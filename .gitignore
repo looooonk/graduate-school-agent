@@ -11,3 +11,13 @@ __pycache__/
 *.bkp
 .vscode/
 *.env
+
+# Project-specific
+output/
+input/*
+!input/.gitkeep
+!input/schools.example.json
+*.egg-info/
+dist/
+build/
+.claude/
