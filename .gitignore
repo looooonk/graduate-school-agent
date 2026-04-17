@@ -1,0 +1,13 @@
+.DS_Store
+*.ptlog
+*.ptnnp
+*.pth
+*.pyc
+__pycache__/
+*.tar.gz
+*-ubyte
+*-ubyte.gz
+*.pt
+*.bkp
+.vscode/
+*.env
