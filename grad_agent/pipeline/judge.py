@@ -16,6 +16,7 @@ from grad_agent.models import JudgeReport, SchoolProfile
 from grad_agent.pipeline.prompts import JUDGE_SYSTEM, judge_user_prompt
 from grad_agent.reporting.stats import StageStats, timed
 from grad_agent.util.log import get_school_logger
+from grad_agent.util.retry import api_create_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -60,11 +61,13 @@ async def run_judge(
     profile_json = profile.model_dump_json(indent=2)
 
     with timed() as elapsed:
-        response = await client.messages.create(
-            model=config.sonnet_model,
-            max_tokens=2048,
-            system=JUDGE_SYSTEM,
-            messages=[{"role": "user", "content": judge_user_prompt(profile_json)}],
+        response = await api_create_with_retry(
+            lambda: client.messages.create(
+                model=config.sonnet_model,
+                max_tokens=2048,
+                system=JUDGE_SYSTEM,
+                messages=[{"role": "user", "content": judge_user_prompt(profile_json)}],
+            )
         )
 
         stats.api_calls += 1

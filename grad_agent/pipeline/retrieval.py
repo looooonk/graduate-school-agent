@@ -20,6 +20,7 @@ from grad_agent.pipeline.prompts import RETRIEVAL_SYSTEM, retrieval_user_prompt
 from grad_agent.pipeline.tools import TOOL_DEFINITIONS, dispatch_tool
 from grad_agent.reporting.stats import StageStats, timed
 from grad_agent.util.log import get_school_logger
+from grad_agent.util.retry import api_create_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -89,12 +90,14 @@ async def run_retrieval(
         for turn in range(1, config.max_retrieval_turns + 1):
             log.info("Turn %d/%d", turn, config.max_retrieval_turns)
 
-            response = await client.messages.create(
-                model=config.haiku_model,
-                max_tokens=4096,
-                system=RETRIEVAL_SYSTEM,
-                tools=TOOL_DEFINITIONS,
-                messages=messages,
+            response = await api_create_with_retry(
+                lambda: client.messages.create(
+                    model=config.haiku_model,
+                    max_tokens=4096,
+                    system=RETRIEVAL_SYSTEM,
+                    tools=TOOL_DEFINITIONS,
+                    messages=messages,
+                )
             )
 
             # Accumulate token stats

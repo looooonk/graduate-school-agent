@@ -66,7 +66,7 @@ class Config:
             overrides: Key-value pairs that take precedence over both the YAML
                 file and defaults. Keys match the Config field names.
         """
-        dotenv.load_dotenv(dotenv.find_dotenv(usecwd=True))
+        dotenv.load_dotenv(dotenv.find_dotenv(usecwd=True), override=True)
         path = Path(yaml_path) if yaml_path else _DEFAULT_YAML_PATH
         raw = _load_yaml(path)
         ov = overrides or {}

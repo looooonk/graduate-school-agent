@@ -24,6 +24,7 @@ from grad_agent.models import (
 from grad_agent.pipeline.fit import run_fit_assessment
 from grad_agent.pipeline.judge import run_judge
 from grad_agent.pipeline.retrieval import run_retrieval
+from grad_agent.util.retry import api_create_with_retry
 from grad_agent.reporting.markdown import render_school_markdown, render_summary_table
 from grad_agent.reporting.stats import SchoolStats, StageStats, StatsCollector, timed
 from grad_agent.util.log import get_school_logger
@@ -175,12 +176,14 @@ async def _run_gap_fill(
         for turn in range(1, config.gap_fill_max_turns + 1):
             log.info("Gap-fill turn %d/%d", turn, config.gap_fill_max_turns)
 
-            response = await client.messages.create(
-                model=config.haiku_model,
-                max_tokens=4096,
-                system=RETRIEVAL_SYSTEM,
-                tools=TOOL_DEFINITIONS,
-                messages=messages,
+            response = await api_create_with_retry(
+                lambda: client.messages.create(
+                    model=config.haiku_model,
+                    max_tokens=4096,
+                    system=RETRIEVAL_SYSTEM,
+                    tools=TOOL_DEFINITIONS,
+                    messages=messages,
+                )
             )
             stats.api_calls += 1
             stats.input_tokens += response.usage.input_tokens
