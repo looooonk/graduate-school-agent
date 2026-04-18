@@ -138,7 +138,9 @@ def render_summary_table(
     return "\n".join(lines) + "\n"
 
 
-def _yn(val: bool | None) -> str:
+def _yn(val: str | bool | None) -> str:
     if val is None:
         return "*not found*"
+    if isinstance(val, str):
+        return val
     return "Yes" if val else "No"

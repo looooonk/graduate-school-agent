@@ -55,6 +55,15 @@ def _parse_args() -> argparse.Namespace:
         help="Path to the applicant's CV (default: input/cv.md)",
     )
     parser.add_argument(
+        "--context",
+        type=Path,
+        default=Path("input/context.md"),
+        help=(
+            "Path to applicant context file injected into every pipeline stage "
+            "(default: input/context.md; silently skipped if absent)"
+        ),
+    )
+    parser.add_argument(
         "--config",
         type=Path,
         default=None,
@@ -133,6 +142,18 @@ def main() -> None:
         sys.exit(1)
     cv_text = cv_path.read_text(encoding="utf-8")
 
+    # Load optional applicant context
+    context_path: Path = args.context
+    if context_path.exists():
+        context_text = context_path.read_text(encoding="utf-8")
+        log.info("Loaded applicant context from %s", context_path)
+    elif args.context != Path("input/context.md"):
+        # User explicitly specified a path that doesn't exist — treat as an error
+        print(f"Error: context file not found: {context_path}", file=sys.stderr)
+        sys.exit(1)
+    else:
+        context_text = ""
+
     # Load school list
     schools = _load_schools(args)
     log.info("Loaded %d school(s) to research", len(schools))
@@ -162,7 +183,7 @@ def main() -> None:
     )
 
     # Run pipeline
-    collector = asyncio.run(run_all_schools(schools, cv_text, config))
+    collector = asyncio.run(run_all_schools(schools, cv_text, config, context_text))
 
     # Print summary
     print(collector.summary())

@@ -8,9 +8,9 @@ exist mid-retrieval without validation failures.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -18,13 +18,25 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 
 class Requirements(BaseModel):
-    """Formal application requirements."""
+    """Formal application requirements.
 
-    gre_required: Optional[bool] = None
+    Fields that are commonly booleans (gre_required, statement_of_purpose) also
+    accept descriptive strings (e.g. "Optional for 2025-2026"), because the
+    model often produces more informative text than a bare yes/no.
+    """
+
+    gre_required: Optional[str | bool] = None
     gpa_minimum: Optional[str] = None
-    statement_of_purpose: Optional[bool] = None
-    recommendations: Optional[int] = None
+    statement_of_purpose: Optional[str | bool] = None
+    recommendations: Optional[str | int] = None
     other: list[str] = Field(default_factory=list)
+
+    @field_validator("other", mode="before")
+    @classmethod
+    def coerce_other(cls, v: Any) -> list[str]:
+        if isinstance(v, str):
+            return [v] if v.strip() else []
+        return v or []
 
 
 class ApplicantReports(BaseModel):
@@ -49,6 +61,56 @@ class SchoolProfile(BaseModel):
     applicant_reports: ApplicantReports = Field(default_factory=ApplicantReports)
     sources: list[str] = Field(default_factory=list)
     notes: Optional[str] = None
+
+    @field_validator("deadline", mode="before")
+    @classmethod
+    def coerce_deadline(cls, v: Any) -> str | None:
+        """Accept a dict of deadline types (e.g. {'fall': 'March 1'}) → single string."""
+        if isinstance(v, dict):
+            return "; ".join(f"{k}: {val}" for k, val in v.items() if val)
+        return v
+
+    @field_validator("essay_prompts", "research_areas", mode="before")
+    @classmethod
+    def coerce_str_to_list(cls, v: Any) -> list[str]:
+        if isinstance(v, str):
+            return [v] if v.strip() else []
+        return v or []
+
+    @field_validator("advisor_candidates", mode="before")
+    @classmethod
+    def coerce_advisor_candidates(cls, v: Any) -> list[str]:
+        """Accept list[str] or list[dict] (with name/research/url keys)."""
+        if not v:
+            return []
+        result: list[str] = []
+        for item in v:
+            if isinstance(item, dict):
+                name = item.get("name", "")
+                research = item.get("research") or item.get("focus") or item.get("research_focus", "")
+                url = item.get("url") or item.get("profile_url", "")
+                entry = " — ".join(p for p in [name, research] if p)
+                if url:
+                    entry += f" ({url})"
+                result.append(entry)
+            else:
+                result.append(str(item))
+        return result
+
+    @field_validator("sources", mode="before")
+    @classmethod
+    def coerce_sources(cls, v: Any) -> list[str]:
+        """Accept list[str] or a dict mapping category → URL."""
+        if isinstance(v, dict):
+            return [str(url) for url in v.values() if url]
+        return v or []
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def coerce_notes(cls, v: Any) -> str | None:
+        if isinstance(v, list):
+            return "\n".join(str(x) for x in v if x)
+        return v
 
 
 # ---------------------------------------------------------------------------

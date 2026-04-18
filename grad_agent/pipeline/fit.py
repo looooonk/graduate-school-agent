@@ -49,8 +49,17 @@ async def run_fit_assessment(
     profile: SchoolProfile,
     config: Config,
     client: anthropic.AsyncAnthropic,
+    context_text: str = "",
 ) -> tuple[FitAssessment, StageStats]:
     """Assess applicant fit against a school profile.
+
+    Args:
+        cv_text: The applicant's CV in plain text or Markdown.
+        profile: The school profile to assess fit against.
+        config: Pipeline configuration.
+        client: Anthropic async client.
+        context_text: Optional applicant context providing additional goals or
+            preferences beyond the CV (e.g. target subfield, geographic constraints).
 
     Raises:
         RuntimeError: If the model fails to produce a valid FitAssessment.
@@ -67,7 +76,7 @@ async def run_fit_assessment(
                 model=config.sonnet_model,
                 max_tokens=2048,
                 system=FIT_SYSTEM,
-                messages=[{"role": "user", "content": fit_user_prompt(cv_text, profile_json)}],
+                messages=[{"role": "user", "content": fit_user_prompt(cv_text, profile_json, context_text)}],
             )
         )
 

@@ -12,12 +12,14 @@ pip install -e .
 export ANTHROPIC_API_KEY=sk-ant-...
 export BRAVE_API_KEY=BSA...
 
-# Place your CV and school list in input/
+# Place your CV, school list, and optional context in input/
 cp input/schools.example.json input/schools.json  # edit with your schools
+cp input/context.example.md input/context.md      # edit with your focus areas
 # Create input/cv.md with your CV
 
 # Run
 grad-agent --schools input/schools.json --cv input/cv.md
+# context.md is loaded automatically if present; pass --context to use a different path
 ```
 
 ## Architecture
@@ -53,14 +55,14 @@ grad_agent/
 
 ### Data Flow
 
-1. **Input**: School list (`input/schools.json`) + applicant CV (`input/cv.md`)
-2. **Stage 1** (`pipeline/retrieval.py`): Haiku model iteratively calls `web_search` and `fetch_page` tools to populate a `SchoolProfile`. Runs up to `max_turns` (default 15).
-3. **Stage 2** (`pipeline/judge.py`): Sonnet evaluates profile quality → `JudgeReport` with pass/partial/insufficient rating and flagged fields.
-4. **Stage 3** (`pipeline/fit.py`): Sonnet cross-references CV against profile → `FitAssessment` with 0.0–1.0 score.
-5. **Gap-fill** (optional): If judge rates "insufficient" and `retry_gap_fill: true`, re-runs targeted retrieval using judge's suggested queries, then re-evaluates.
+1. **Input**: School list (`input/schools.json`) + applicant CV (`input/cv.md`) + optional context (`input/context.md`)
+2. **Stage 1** (`pipeline/retrieval.py`): Haiku model iteratively calls `web_search` and `fetch_page` tools to populate a `SchoolProfile`. Runs up to `max_turns` (default 25). Context is injected into the initial user message to focus the search.
+3. **Stage 2** (`pipeline/judge.py`): Sonnet evaluates profile quality → `JudgeReport` with pass/partial/insufficient rating and flagged fields. Context is injected to prioritise gaps relevant to the applicant's subfield.
+4. **Stage 3** (`pipeline/fit.py`): Sonnet cross-references CV against profile → `FitAssessment` with 0.0–1.0 score. Context supplements the CV with goals and constraints not visible in the CV itself.
+5. **Gap-fill** (optional): If judge rates "insufficient" and `retry_gap_fill: true`, re-runs targeted retrieval using judge's suggested queries, then re-evaluates (context passed through here as well).
 6. **Output**: Per-school Markdown file + `summary.md` with priority-ranked table in `output/`.
 
-Stages 2 and 3 run concurrently via `asyncio.gather`. Multiple schools run with bounded concurrency (`concurrency.max_schools_parallel`, default 3).
+Stages 2 and 3 run concurrently via `asyncio.gather`. Schools run sequentially to avoid rate limits.
 
 ## Configuration
 
@@ -104,11 +106,14 @@ BRAVE_API_KEY=BSA...
 
 `--max-turns`, `--max-parallel`, `--no-gap-fill`, `--output`, `--config` override the corresponding YAML settings for a single run.
 
+`--context` overrides the default `input/context.md` path; errors if the specified file does not exist.
+
 ## Input / Output
 
 **Input directory** (`input/`, gitignored except examples):
 - `schools.json` — `[{"school": "...", "program": "..."}, ...]`
 - `cv.md` — applicant's CV in plain text or Markdown
+- `context.md` *(optional)* — free-form applicant context injected into every pipeline stage; use it to specify target subfields, advisor preferences, funding requirements, geographic constraints, or scoring guidance. See `context.example.md` for a template. Silently skipped if absent.
 
 **Output directory** (`output/`, gitignored):
 - `{school_name}_{program}_profile.md` — full report per school
@@ -120,7 +125,7 @@ Each profile contains: header, requirements, research & faculty, essay prompts, 
 
 Decisions resolved from `DESIGN.md` open questions:
 
-- **Turn budget**: 15 (as suggested), configurable via `retrieval.max_turns`
+- **Turn budget**: 25, configurable via `retrieval.max_turns`
 - **Gap-fill on insufficient**: Enabled by default, configurable via `judge.retry_gap_fill`
 - **Search API**: Brave Search (cost-effective, good coverage, simple API)
 - **Output format**: Both per-school files and a consolidated summary table

@@ -6,6 +6,55 @@ import logging
 import sys
 from typing import Any
 
+# ANSI escape helpers
+_RESET  = "\033[0m"
+_BOLD   = "\033[1m"
+_DIM    = "\033[2m"
+_CYAN   = "\033[36m"
+_GREEN  = "\033[32m"
+_YELLOW = "\033[33m"
+_RED    = "\033[31m"
+_BRED   = "\033[1;31m"  # bold red
+
+_LEVEL_COLORS: dict[int, str] = {
+    logging.DEBUG:    _DIM,
+    logging.INFO:     _GREEN,
+    logging.WARNING:  _YELLOW,
+    logging.ERROR:    _RED,
+    logging.CRITICAL: _BRED,
+}
+
+class ColorFormatter(logging.Formatter):
+    """Formatter that applies ANSI colors when writing to a TTY.
+
+    Falls back to plain text when stdout/stderr is redirected, so piped or
+    captured output stays machine-readable.
+    """
+
+    def __init__(self, *, use_color: bool) -> None:
+        super().__init__()
+        self._use_color = use_color
+
+    def format(self, record: logging.LogRecord) -> str:
+        school = getattr(record, "school", "[global]")
+        level = record.levelname
+        name = record.name
+        msg = record.getMessage()
+
+        if record.exc_info:
+            msg = msg + "\n" + self.formatException(record.exc_info)
+
+        if self._use_color:
+            color = _LEVEL_COLORS.get(record.levelno, "")
+            return (
+                f"{color}{_BOLD}{level:<8}{_RESET} | "
+                f"{_CYAN}{school:<40}{_RESET} | "
+                f"{_DIM}{name}{_RESET} | "
+                f"{color}{msg}{_RESET}"
+            )
+
+        return f"{level:<8} | {school:<40} | {name} | {msg}"
+
 
 class SchoolContextFilter(logging.Filter):
     """Injects a `school` field into every log record.
@@ -19,19 +68,16 @@ class SchoolContextFilter(logging.Filter):
         return True
 
 
-_FORMAT = "%(asctime)s | %(levelname)-8s | %(school)-40s | %(name)s | %(message)s"
-_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
-
-
 def setup_logging(*, verbose: bool = False) -> None:
-    """Configure root logger with structured formatting.
+    """Configure root logger with color-aware structured formatting.
 
-    Call once at process startup.
+    Call once at process startup. Color is enabled only when stderr is a TTY.
     """
     level = logging.DEBUG if verbose else logging.INFO
+    use_color = sys.stderr.isatty()
 
     handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(logging.Formatter(_FORMAT, datefmt=_DATE_FORMAT))
+    handler.setFormatter(ColorFormatter(use_color=use_color))
     handler.addFilter(SchoolContextFilter())
 
     root = logging.getLogger()

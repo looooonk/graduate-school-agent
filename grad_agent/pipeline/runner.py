@@ -39,8 +39,18 @@ async def run_school(
     config: Config,
     client: anthropic.AsyncAnthropic,
     http: httpx.AsyncClient,
+    context_text: str = "",
 ) -> tuple[SchoolResult, SchoolStats]:
     """Run the full 3-stage pipeline for a single school.
+
+    Args:
+        school_name: Name of the school.
+        program_name: Name of the graduate program.
+        cv_text: The applicant's CV text.
+        config: Pipeline configuration.
+        client: Anthropic async client.
+        http: Async HTTP client.
+        context_text: Optional applicant context from input/context.md.
 
     Never raises — all errors are captured in SchoolResult.error and SchoolStats.
     """
@@ -54,7 +64,7 @@ async def run_school(
         # --- Stage 1: Retrieval ---
         try:
             profile, retrieval_stats = await run_retrieval(
-                school_name, program_name, config, client, http,
+                school_name, program_name, config, client, http, context_text,
             )
             school_stats.stages.append(retrieval_stats)
             log.info("Retrieval complete")
@@ -76,7 +86,7 @@ async def run_school(
         async def _run_judge() -> None:
             nonlocal judge_report, judge_stats
             try:
-                judge_report, judge_stats = await run_judge(profile, config, client)
+                judge_report, judge_stats = await run_judge(profile, config, client, context_text)
             except Exception as exc:
                 log.error("Judge failed: %s", exc)
                 judge_stats = StageStats(stage="judge", model=config.sonnet_model)
@@ -85,7 +95,7 @@ async def run_school(
             nonlocal fit_assessment, fit_stats
             try:
                 fit_assessment, fit_stats = await run_fit_assessment(
-                    cv_text, profile, config, client,
+                    cv_text, profile, config, client, context_text,
                 )
             except Exception as exc:
                 log.error("Fit assessment failed: %s", exc)
@@ -116,13 +126,13 @@ async def run_school(
                 school_stats.stages.append(gap_stats)
 
                 # Re-run judge on updated profile
-                judge_report, judge_stats2 = await run_judge(profile, config, client)
+                judge_report, judge_stats2 = await run_judge(profile, config, client, context_text)
                 school_stats.stages.append(judge_stats2)
                 log.info("Post-gap-fill judge verdict: %s", judge_report.overall_quality.value)
 
                 # Re-run fit on updated profile
                 fit_assessment, fit_stats2 = await run_fit_assessment(
-                    cv_text, profile, config, client,
+                    cv_text, profile, config, client, context_text,
                 )
                 school_stats.stages.append(fit_stats2)
             except Exception as exc:
@@ -147,7 +157,7 @@ async def _run_gap_fill(
     http: httpx.AsyncClient,
 ) -> tuple[SchoolProfile, StageStats]:
     """Targeted gap-fill: re-run retrieval with judge's suggested queries as guidance."""
-    from grad_agent.pipeline.prompts import RETRIEVAL_SYSTEM
+    from grad_agent.pipeline.prompts import RETRIEVAL_SYSTEM, retrieval_turn_status
     from grad_agent.pipeline.retrieval import _extract_json_from_text
     from grad_agent.pipeline.tools import TOOL_DEFINITIONS, dispatch_tool
 
@@ -167,7 +177,8 @@ async def _run_gap_fill(
                 f"The quality judge flagged these gaps and suggested these queries:\n{suggested}\n\n"
                 f"Please run these suggested searches (and any others you think are needed) "
                 f"to fill in the missing information, then output an UPDATED complete "
-                f"SchoolProfile JSON incorporating both the existing data and new findings."
+                f"SchoolProfile JSON incorporating both the existing data and new findings. "
+                f"You have a budget of **{config.gap_fill_max_turns} turns** total."
             ),
         },
     ]
@@ -212,7 +223,13 @@ async def _run_gap_fill(
                             "content": result,
                         })
                 messages.append({"role": "assistant", "content": assistant_content})
-                messages.append({"role": "user", "content": tool_results})
+                messages.append({
+                    "role": "user",
+                    "content": [
+                        *tool_results,
+                        {"type": "text", "text": retrieval_turn_status(turn, config.gap_fill_max_turns)},
+                    ],
+                })
 
             elif response.stop_reason == "end_turn":
                 text_parts = [b.text for b in response.content if b.type == "text"]
@@ -238,13 +255,16 @@ async def run_all_schools(
     schools: list[tuple[str, str]],
     cv_text: str,
     config: Config,
+    context_text: str = "",
 ) -> StatsCollector:
-    """Launch pipelines for all schools with bounded concurrency.
+    """Launch pipelines for all schools sequentially to avoid rate limits.
 
     Args:
         schools: List of (school_name, program_name) tuples.
         cv_text: The applicant's CV text.
         config: Pipeline configuration.
+        context_text: Optional applicant context from input/context.md, injected
+            into every stage (retrieval, judge, fit) for all schools.
 
     Returns:
         StatsCollector with results for all schools.
@@ -253,32 +273,24 @@ async def run_all_schools(
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    semaphore = asyncio.Semaphore(config.max_schools_parallel)
     client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key)
 
     async with httpx.AsyncClient() as http:
         all_results: list[tuple[SchoolResult, SchoolStats]] = []
 
-        async def _process_school(school_name: str, program_name: str) -> None:
-            async with semaphore:
-                result, stats = await run_school(
-                    school_name, program_name, cv_text, config, client, http,
-                )
-                collector.add_school(stats)
-                all_results.append((result, stats))
+        for school_name, program_name in schools:
+            result, stats = await run_school(
+                school_name, program_name, cv_text, config, client, http, context_text,
+            )
+            collector.add_school(stats)
+            all_results.append((result, stats))
 
-                # Write individual school markdown
-                md = render_school_markdown(result.profile, result.judge, result.fit)
-                safe_name = _safe_filename(school_name, program_name)
-                path = output_dir / f"{safe_name}_profile.md"
-                path.write_text(md, encoding="utf-8")
-                logger.info("Wrote %s", path)
-
-        tasks = [
-            _process_school(school, program)
-            for school, program in schools
-        ]
-        await asyncio.gather(*tasks)
+            # Write individual school markdown
+            md = render_school_markdown(result.profile, result.judge, result.fit)
+            safe_name = _safe_filename(school_name, program_name)
+            path = output_dir / f"{safe_name}_profile.md"
+            path.write_text(md, encoding="utf-8")
+            logger.info("Wrote %s", path)
 
     # Write summary table
     summary_data = [

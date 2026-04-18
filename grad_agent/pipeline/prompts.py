@@ -49,26 +49,99 @@ When you have gathered enough information OR exhausted your search budget, \
 respond with a JSON object matching the SchoolProfile schema. Output ONLY \
 the JSON — no prose before or after.
 
-The JSON must have these top-level keys:
-school_name, program_name, deadline, application_fee, requirements, \
-essay_prompts, research_areas, advisor_candidates, applicant_reports, \
-sources, notes
+Field types (follow these exactly):
+- school_name, program_name: string
+- deadline: string (e.g. "December 1, 2025" or "Rolling" — NOT a dict)
+- application_fee: string (e.g. "$75")
+- requirements.gre_required: boolean true/false (or a short string if conditional)
+- requirements.gpa_minimum: string (e.g. "3.0") or null
+- requirements.statement_of_purpose: boolean true/false
+- requirements.recommendations: integer (e.g. 3)
+- requirements.other: array of strings (NOT a single string)
+- essay_prompts: array of strings (NOT a single string)
+- research_areas: array of strings
+- advisor_candidates: array of strings in "Name — Research focus" format (NOT objects)
+- applicant_reports.typical_gpa, typical_gre, acceptance_signals: strings or null
+- sources: array of URL strings (NOT a dict)
+- notes: string or null (NOT an array)
 
-Where:
-- requirements: {gre_required, gpa_minimum, statement_of_purpose, \
-recommendations, other}
-- applicant_reports: {typical_gpa, typical_gre, acceptance_signals}
+Example of a correctly-formatted response:
+
+```json
+{
+  "school_name": "Example University",
+  "program_name": "PhD Computer Science",
+  "deadline": "December 15, 2025",
+  "application_fee": "$90",
+  "requirements": {
+    "gre_required": false,
+    "gpa_minimum": "3.2",
+    "statement_of_purpose": true,
+    "recommendations": 3,
+    "other": ["TOEFL required for international applicants", "Writing sample optional"]
+  },
+  "essay_prompts": [
+    "Describe your research experience and goals (500 words).",
+    "Why are you applying to this program specifically (250 words)?"
+  ],
+  "research_areas": ["Machine learning", "Computer vision", "Natural language processing"],
+  "advisor_candidates": [
+    "Jane Smith — reinforcement learning and robotics",
+    "Bob Lee — NLP and large language models"
+  ],
+  "applicant_reports": {
+    "typical_gpa": "3.7–3.9",
+    "typical_gre": "163Q / 158V (waived for most recent cycle)",
+    "acceptance_signals": "GradCafe reports suggest ~8% acceptance; strong research statements appear critical."
+  },
+  "sources": [
+    "https://example.edu/cs/phd/admissions",
+    "https://example.edu/cs/faculty",
+    "https://www.gradcafe.com/results/example-cs-phd"
+  ],
+  "notes": "Rolling admissions after January 1 for spring intake."
+}
+```
 """
 
 
-def retrieval_user_prompt(school_name: str, program_name: str) -> str:
+def retrieval_user_prompt(
+    school_name: str,
+    program_name: str,
+    context_text: str = "",
+    max_turns: int = 0,
+) -> str:
     """Build the initial user message for the retrieval agent."""
+    context_section = (
+        f"## Applicant Context\n\n{context_text.strip()}\n\n"
+        if context_text.strip()
+        else ""
+    )
+    budget_note = f" You have a budget of **{max_turns} turns** total." if max_turns > 0 else ""
     return (
+        f"{context_section}"
         f"Research the following graduate program and populate a complete "
         f"SchoolProfile:\n\n"
         f"**School**: {school_name}\n"
         f"**Program**: {program_name}\n\n"
+        f"Use the applicant context above (if provided) to focus your search — "
+        f"for example, prioritising the subfields and advisor types most relevant "
+        f"to the applicant.{budget_note}\n\n"
         f"Begin by searching for the official program page."
+    )
+
+
+def retrieval_turn_status(turn: int, max_turns: int) -> str:
+    """Return a brief turn-budget reminder appended to each tool-result message."""
+    remaining = max_turns - turn
+    if remaining <= 0:
+        return (
+            f"[Turn {turn}/{max_turns} — **budget exhausted**. "
+            f"Output the final SchoolProfile JSON now.]"
+        )
+    urgency = " Start wrapping up." if remaining <= 3 else ""
+    return (
+        f"[Turn {turn}/{max_turns} complete — {remaining} turn(s) remaining.{urgency}]"
     )
 
 
@@ -92,6 +165,16 @@ should ideally come from official sources.
 profile?
 4. **Confidence**: Flag fields you consider unverified or low-confidence. \
 Deadlines are especially important to flag if they come from unofficial sources.
+5. **Application cycle**: If the applicant context specifies a target admission \
+cycle (e.g. Fall 2027), apply the following deadline policy:
+   - Deadlines published for the target cycle are ideal — note them as current.
+   - Deadlines from the most recent past cycle are **acceptable proxies** — do \
+NOT flag them as missing or insufficient; instead note them as "prior cycle, \
+verify when {target cycle} opens".
+   - Only flag a deadline as a gap if no deadline from any recent cycle is \
+present at all.
+   - Apply the same proxy logic to application fees and requirements, which \
+change infrequently.
 
 ## Output
 
@@ -116,8 +199,21 @@ Output ONLY the JSON — no prose before or after.
 """
 
 
-def judge_user_prompt(profile_json: str) -> str:
+def judge_user_prompt(profile_json: str, context_text: str = "") -> str:
+    """Build the user message for the judge, optionally including applicant context."""
+    context_section = (
+        f"## Applicant Context\n\n{context_text.strip()}\n\n"
+        f"Use this context when evaluating the profile:\n"
+        f"- Prioritise gaps in fields most relevant to this applicant "
+        f"(e.g. their target subfield, preferred advisor types).\n"
+        f"- Apply the application-cycle deadline policy from your instructions: "
+        f"treat prior-cycle deadlines as acceptable proxies rather than gaps, "
+        f"noting them as unverified for the target cycle.\n\n"
+        if context_text.strip()
+        else ""
+    )
     return (
+        f"{context_section}"
         f"Evaluate the following SchoolProfile for quality and coverage:\n\n"
         f"```json\n{profile_json}\n```"
     )
@@ -164,8 +260,15 @@ Output ONLY the JSON — no prose before or after.
 """
 
 
-def fit_user_prompt(cv_text: str, profile_json: str) -> str:
+def fit_user_prompt(cv_text: str, profile_json: str, context_text: str = "") -> str:
+    """Build the user message for the fit assessor, optionally including applicant context."""
+    context_section = (
+        f"## Applicant Context\n\n{context_text.strip()}\n\n"
+        if context_text.strip()
+        else ""
+    )
     return (
+        f"{context_section}"
         f"## Applicant CV\n\n{cv_text}\n\n"
         f"## School Profile\n\n```json\n{profile_json}\n```"
     )

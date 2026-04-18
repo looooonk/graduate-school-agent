@@ -16,7 +16,7 @@ import httpx
 
 from grad_agent.config import Config
 from grad_agent.models import SchoolProfile
-from grad_agent.pipeline.prompts import RETRIEVAL_SYSTEM, retrieval_user_prompt
+from grad_agent.pipeline.prompts import RETRIEVAL_SYSTEM, retrieval_turn_status, retrieval_user_prompt
 from grad_agent.pipeline.tools import TOOL_DEFINITIONS, dispatch_tool
 from grad_agent.reporting.stats import StageStats, timed
 from grad_agent.util.log import get_school_logger
@@ -69,10 +69,21 @@ async def run_retrieval(
     config: Config,
     client: anthropic.AsyncAnthropic,
     http: httpx.AsyncClient,
+    context_text: str = "",
 ) -> tuple[SchoolProfile, StageStats]:
     """Run the Haiku retrieval agent for a single school.
 
-    Returns the populated SchoolProfile and stage statistics.
+    Args:
+        school_name: Name of the school.
+        program_name: Name of the graduate program.
+        config: Pipeline configuration.
+        client: Anthropic async client.
+        http: Async HTTP client for tool execution.
+        context_text: Optional applicant context (from input/context.md) used to
+            focus the search on relevant subfields and advisor types.
+
+    Returns:
+        The populated SchoolProfile and stage statistics.
 
     Raises:
         RuntimeError: If the agent fails to produce a valid profile after
@@ -83,7 +94,9 @@ async def run_retrieval(
     school_label = f"{school_name} — {program_name}"
 
     messages: list[dict[str, Any]] = [
-        {"role": "user", "content": retrieval_user_prompt(school_name, program_name)},
+        {"role": "user", "content": retrieval_user_prompt(
+            school_name, program_name, context_text, config.max_retrieval_turns,
+        )},
     ]
 
     with timed() as elapsed:
@@ -138,7 +151,13 @@ async def run_retrieval(
                         })
 
                 messages.append({"role": "assistant", "content": assistant_content})
-                messages.append({"role": "user", "content": tool_results})
+                messages.append({
+                    "role": "user",
+                    "content": [
+                        *tool_results,
+                        {"type": "text", "text": retrieval_turn_status(turn, config.max_retrieval_turns)},
+                    ],
+                })
 
             elif response.stop_reason == "end_turn":
                 # Model is done — extract the final JSON from its response

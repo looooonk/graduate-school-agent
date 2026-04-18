@@ -48,8 +48,16 @@ async def run_judge(
     profile: SchoolProfile,
     config: Config,
     client: anthropic.AsyncAnthropic,
+    context_text: str = "",
 ) -> tuple[JudgeReport, StageStats]:
     """Evaluate a SchoolProfile and return a JudgeReport.
+
+    Args:
+        profile: The school profile to evaluate.
+        config: Pipeline configuration.
+        client: Anthropic async client.
+        context_text: Optional applicant context used to prioritise gap detection
+            for fields relevant to the applicant's subfield and goals.
 
     Raises:
         RuntimeError: If the model fails to produce a valid JudgeReport.
@@ -66,7 +74,7 @@ async def run_judge(
                 model=config.sonnet_model,
                 max_tokens=2048,
                 system=JUDGE_SYSTEM,
-                messages=[{"role": "user", "content": judge_user_prompt(profile_json)}],
+                messages=[{"role": "user", "content": judge_user_prompt(profile_json, context_text)}],
             )
         )
 
