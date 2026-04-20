@@ -48,8 +48,6 @@ _STAGE_LABELS: dict[str, tuple[str, str]] = {
 }
 
 
-# ── Per-school mutable state ──────────────────────────────────────────────────
-
 @dataclass
 class _SchoolRow:
     label: str
@@ -65,15 +63,18 @@ class _SchoolRow:
     _start: float = field(default_factory=time.monotonic)
 
     def current_elapsed(self) -> float:
+        """Return wall-clock seconds since the school started, or the final elapsed time if done."""
         return self.elapsed if self.done else time.monotonic() - self._start
 
-
-# ── Logging handler ───────────────────────────────────────────────────────────
 
 class _TUILogHandler(logging.Handler):
     """Routes log records into a bounded deque for the TUI log panel."""
 
     def __init__(self, buffer: deque[tuple[str, str, str]]) -> None:
+        """
+        Args:
+            buffer: Shared deque to append (levelname, school, message) tuples into.
+        """
         super().__init__()
         self._buffer = buffer
 
@@ -85,12 +86,14 @@ class _TUILogHandler(logging.Handler):
             self.handleError(record)
 
 
-# ── Renderable ────────────────────────────────────────────────────────────────
-
 class _Renderable:
     """Mutable object whose ``__rich__`` method is called on every Live refresh."""
 
     def __init__(self, total: int) -> None:
+        """
+        Args:
+            total: Total number of schools in this run; used for the progress bar.
+        """
         self.total = total
         self.done_count = 0
         self.rows: dict[str, _SchoolRow] = {}
@@ -160,6 +163,7 @@ class _Renderable:
         return Panel(txt, title="Log", expand=True)
 
     def on_event(self, event: PipelineEvent) -> None:
+        """Update internal row state in response to a pipeline event."""
         if isinstance(event, SchoolStarted):
             self.rows[event.school] = _SchoolRow(label=event.school, idx=event.idx)
         elif isinstance(event, StageStarted):
@@ -184,8 +188,6 @@ class _Renderable:
             self.done_count += 1
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
-
 class PipelineTUI:
     """Manages the Rich live display and log capture for a pipeline run.
 
@@ -203,6 +205,10 @@ class PipelineTUI:
     """
 
     def __init__(self, total: int) -> None:
+        """
+        Args:
+            total: Total number of schools to be processed; drives the progress bar.
+        """
         self._renderable = _Renderable(total=total)
         self._live = Live(
             self._renderable,

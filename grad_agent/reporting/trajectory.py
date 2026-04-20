@@ -16,10 +16,10 @@ a ``type`` discriminator.  Event types:
 from __future__ import annotations
 
 import json
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Generator, TYPE_CHECKING
+from types import TracebackType
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from grad_agent.models import FitAssessment, JudgeReport, SchoolProfile
@@ -30,7 +30,15 @@ def _now() -> str:
 
 
 def _serialize_content(content: list[Any]) -> list[dict[str, Any]]:
-    """Convert Anthropic response content blocks to plain dicts."""
+    """Convert Anthropic response content blocks to plain dicts for JSONL serialization.
+
+    Args:
+        content: List of Anthropic SDK content block objects (TextBlock, ToolUseBlock, etc.).
+
+    Returns:
+        List of plain dicts with a ``type`` key; unknown block types are reduced to
+        ``{"type": <type_str>}`` so the record is never lost.
+    """
     out: list[dict[str, Any]] = []
     for block in content:
         if block.type == "text":
@@ -68,7 +76,12 @@ class TrajectoryLogger:
         self._file = self._path.open("w", encoding="utf-8")
         return self
 
-    def __exit__(self, *_: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         if self._file is not None:
             self._file.close()
             self._file = None

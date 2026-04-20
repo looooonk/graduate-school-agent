@@ -85,13 +85,12 @@ async def run_retrieval(
         http: Async HTTP client for tool execution.
         context_text: Optional applicant context (from input/context.md) used to
             focus the search on relevant subfields and advisor types.
+        on_event: Optional progress callback fired on each turn and tool call.
+        traj: Optional trajectory logger for recording API interactions and results.
 
     Returns:
-        The populated SchoolProfile and stage statistics.
-
-    Raises:
-        RuntimeError: If the agent fails to produce a valid profile after
-            exhausting the turn budget.
+        A tuple of (SchoolProfile, StageStats). If the turn budget is exhausted
+        without a valid profile, returns a minimal stub profile with a warning note.
     """
     log = get_school_logger(__name__, f"{school_name} — {program_name}")
     stats = StageStats(stage="retrieval", model=config.haiku_model)
@@ -122,7 +121,6 @@ async def run_retrieval(
                 )
             )
 
-            # Accumulate token stats
             stats.api_calls += 1
             stats.input_tokens += response.usage.input_tokens
             stats.output_tokens += response.usage.output_tokens
@@ -134,9 +132,7 @@ async def run_retrieval(
             if traj:
                 traj.log_api_response("retrieval", turn, config.haiku_model, response)
 
-            # Check if the model wants to use tools
             if response.stop_reason == "tool_use":
-                # Process all tool calls in this response
                 tool_results: list[dict[str, Any]] = []
                 assistant_content: list[dict[str, Any]] = []
 
@@ -176,7 +172,6 @@ async def run_retrieval(
                 })
 
             elif response.stop_reason == "end_turn":
-                # Model is done — extract the final JSON from its response
                 text_parts = [
                     block.text for block in response.content if block.type == "text"
                 ]
@@ -184,7 +179,7 @@ async def run_retrieval(
 
                 parsed = _extract_json_from_text(full_text)
                 if parsed is not None:
-                    # Ensure school_name and program_name are set correctly
+                    # Override these fields in case the model omitted or misspelled them.
                     parsed["school_name"] = school_name
                     parsed["program_name"] = program_name
                     try:

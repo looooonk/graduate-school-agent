@@ -60,6 +60,10 @@ async def run_judge(
         client: Anthropic async client.
         context_text: Optional applicant context used to prioritise gap detection
             for fields relevant to the applicant's subfield and goals.
+        traj: Optional trajectory logger for recording API interactions.
+
+    Returns:
+        A tuple of (JudgeReport, StageStats).
 
     Raises:
         RuntimeError: If the model fails to produce a valid JudgeReport.

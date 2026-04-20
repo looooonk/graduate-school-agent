@@ -70,31 +70,36 @@ class SchoolStats:
 
 
 class StatsCollector:
-    """Process-level statistics aggregator."""
+    """Process-level statistics aggregator across all schools in a run."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._schools: list[SchoolStats] = []
 
     def add_school(self, stats: SchoolStats) -> None:
+        """Append a completed school's stats. Thread-safe."""
         with self._lock:
             self._schools.append(stats)
 
     @property
     def schools(self) -> list[SchoolStats]:
+        """Snapshot of all recorded school stats. Thread-safe."""
         with self._lock:
             return list(self._schools)
 
     @property
     def total_cost_usd(self) -> float:
+        """Sum of estimated USD cost across all schools."""
         return sum(s.total_cost_usd for s in self.schools)
 
     @property
     def total_input_tokens(self) -> int:
+        """Sum of input tokens consumed across all schools."""
         return sum(s.total_input_tokens for s in self.schools)
 
     @property
     def total_output_tokens(self) -> int:
+        """Sum of output tokens produced across all schools."""
         return sum(s.total_output_tokens for s in self.schools)
 
     def summary(self) -> str:

@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_json(text: str) -> dict[str, Any] | None:
+    """Extract a JSON object from model text, handling fenced blocks."""
     stripped = text.strip()
     if "```" in stripped:
         for block in stripped.split("```"):
@@ -62,6 +63,10 @@ async def run_fit_assessment(
         client: Anthropic async client.
         context_text: Optional applicant context providing additional goals or
             preferences beyond the CV (e.g. target subfield, geographic constraints).
+        traj: Optional trajectory logger for recording API interactions.
+
+    Returns:
+        A tuple of (FitAssessment, StageStats).
 
     Raises:
         RuntimeError: If the model fails to produce a valid FitAssessment.

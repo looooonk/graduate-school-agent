@@ -57,8 +57,12 @@ async def run_school(
         client: Anthropic async client.
         http: Async HTTP client.
         context_text: Optional applicant context from input/context.md.
+        on_event: Optional callback invoked with progress events for the TUI.
+        traj: Optional trajectory logger; records every API call and tool result.
 
-    Never raises — all errors are captured in SchoolResult.error and SchoolStats.
+    Returns:
+        A tuple of (SchoolResult, SchoolStats). Never raises — all errors are
+        captured in SchoolResult.error and SchoolStats.error.
     """
     school_label = f"{school_name} — {program_name}"
     log = get_school_logger(__name__, school_label)
@@ -137,12 +141,10 @@ async def run_school(
                 )
                 school_stats.stages.append(gap_stats)
 
-                # Re-run judge on updated profile
                 judge_report, judge_stats2 = await run_judge(profile, config, client, context_text, traj)
                 school_stats.stages.append(judge_stats2)
                 log.info("Post-gap-fill judge verdict: %s", judge_report.overall_quality.value)
 
-                # Re-run fit on updated profile
                 fit_assessment, fit_stats2 = await run_fit_assessment(
                     cv_text, profile, config, client, context_text, traj,
                 )
@@ -170,7 +172,21 @@ async def _run_gap_fill(
     on_event: EventCallback | None = None,
     traj: TrajectoryLogger | None = None,
 ) -> tuple[SchoolProfile, StageStats]:
-    """Targeted gap-fill: re-run retrieval with judge's suggested queries as guidance."""
+    """Re-run a targeted retrieval pass using the judge's suggested queries.
+
+    Args:
+        profile: The existing profile rated as insufficient.
+        judge_report: The judge's assessment, including suggested search queries.
+        config: Pipeline configuration.
+        client: Anthropic async client.
+        http: Async HTTP client for tool execution.
+        on_event: Optional progress callback.
+        traj: Optional trajectory logger.
+
+    Returns:
+        A tuple of (updated SchoolProfile, StageStats). Returns the original
+        profile unchanged if the model fails to produce a valid updated one.
+    """
     from grad_agent.pipeline.prompts import RETRIEVAL_SYSTEM, retrieval_turn_status
     from grad_agent.pipeline.retrieval import _extract_json_from_text
     from grad_agent.pipeline.tools import TOOL_DEFINITIONS, dispatch_tool
@@ -293,9 +309,10 @@ async def run_all_schools(
         config: Pipeline configuration.
         context_text: Optional applicant context from input/context.md, injected
             into every stage (retrieval, judge, fit) for all schools.
+        on_event: Optional callback invoked with progress events for each school.
 
     Returns:
-        StatsCollector with results for all schools.
+        StatsCollector with aggregated results for all schools.
     """
     collector = StatsCollector()
     output_dir = Path(config.output_dir)
@@ -339,7 +356,6 @@ async def run_all_schools(
             collector.add_school(stats)
             all_results.append((result, stats))
 
-            # Write markdown for this school immediately after pipeline completes.
             md = render_school_markdown(result.profile, result.judge, result.fit)
             safe_name = _safe_filename(school_name, program_name)
             path = output_dir / f"{safe_name}_profile.md"
