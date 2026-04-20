@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 from grad_agent.config import Config
+from grad_agent.events import EventCallback
 from grad_agent.pipeline.runner import run_all_schools
 from grad_agent.util.log import setup_logging
 
@@ -182,8 +183,25 @@ def main() -> None:
         config.max_retrieval_turns, config.max_schools_parallel,
     )
 
+    # Start TUI when running interactively; fall back to plain logging otherwise.
+    # --verbose implies plain logging so debug output remains readable.
+    tui = None
+    on_event: EventCallback | None = None
+    if sys.stderr.isatty() and not args.verbose:
+        try:
+            from grad_agent.tui import PipelineTUI
+            tui = PipelineTUI(total=len(schools))
+            tui.start()
+            on_event = tui.on_event
+        except ImportError:
+            pass  # rich not installed — plain logging already set up above
+
     # Run pipeline
-    collector = asyncio.run(run_all_schools(schools, cv_text, config, context_text))
+    try:
+        collector = asyncio.run(run_all_schools(schools, cv_text, config, context_text, on_event))
+    finally:
+        if tui is not None:
+            tui.stop()
 
     # Print summary
     print(collector.summary())

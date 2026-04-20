@@ -49,6 +49,7 @@ class Config:
 
     # --- Output ---
     output_dir: str
+    logs_dir: str  # set to "" to disable trajectory logging
 
     @classmethod
     def load(
@@ -85,6 +86,7 @@ class Config:
             http_timeout=ov.get("http_timeout", _get(raw, "http.timeout", 20)),
             http_retries=ov.get("http_retries", _get(raw, "http.retries", 2)),
             output_dir=ov.get("output_dir", _get(raw, "output.dir", "output")),
+            logs_dir=ov.get("logs_dir", _get(raw, "logs.dir", "logs")),
         )
 
     def validate(self) -> list[str]:

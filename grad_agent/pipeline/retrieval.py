@@ -15,7 +15,9 @@ import anthropic
 import httpx
 
 from grad_agent.config import Config
+from grad_agent.events import EventCallback, ToolCalled, TurnProgress
 from grad_agent.models import SchoolProfile
+from grad_agent.reporting.trajectory import TrajectoryLogger
 from grad_agent.pipeline.prompts import RETRIEVAL_SYSTEM, retrieval_turn_status, retrieval_user_prompt
 from grad_agent.pipeline.tools import TOOL_DEFINITIONS, dispatch_tool
 from grad_agent.reporting.stats import StageStats, timed
@@ -70,6 +72,8 @@ async def run_retrieval(
     client: anthropic.AsyncAnthropic,
     http: httpx.AsyncClient,
     context_text: str = "",
+    on_event: EventCallback | None = None,
+    traj: TrajectoryLogger | None = None,
 ) -> tuple[SchoolProfile, StageStats]:
     """Run the Haiku retrieval agent for a single school.
 
@@ -93,6 +97,9 @@ async def run_retrieval(
     stats = StageStats(stage="retrieval", model=config.haiku_model)
     school_label = f"{school_name} — {program_name}"
 
+    if traj:
+        traj.log_stage_start("retrieval")
+
     messages: list[dict[str, Any]] = [
         {"role": "user", "content": retrieval_user_prompt(
             school_name, program_name, context_text, config.max_retrieval_turns,
@@ -102,6 +109,8 @@ async def run_retrieval(
     with timed() as elapsed:
         for turn in range(1, config.max_retrieval_turns + 1):
             log.info("Turn %d/%d", turn, config.max_retrieval_turns)
+            if on_event:
+                on_event(TurnProgress(school=school_label, turn=turn, max_turns=config.max_retrieval_turns))
 
             response = await api_create_with_retry(
                 lambda: client.messages.create(
@@ -122,6 +131,9 @@ async def run_retrieval(
             if hasattr(response.usage, "cache_creation_input_tokens"):
                 stats.cache_creation_tokens += response.usage.cache_creation_input_tokens or 0
 
+            if traj:
+                traj.log_api_response("retrieval", turn, config.haiku_model, response)
+
             # Check if the model wants to use tools
             if response.stop_reason == "tool_use":
                 # Process all tool calls in this response
@@ -140,10 +152,14 @@ async def run_retrieval(
                         })
                         stats.tool_calls += 1
                         log.info("Tool call: %s(%s)", block.name, _summarize_args(block.input))
+                        if on_event:
+                            on_event(ToolCalled(school=school_label, tool_name=block.name))
 
                         result = await dispatch_tool(
                             block.name, block.input, config, http, school_label,
                         )
+                        if traj:
+                            traj.log_tool_result("retrieval", turn, block.name, block.input, result)
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": block.id,
@@ -180,6 +196,9 @@ async def run_retrieval(
                             len(profile.research_areas),
                             len(profile.advisor_candidates),
                         )
+                        if traj:
+                            traj.log_profile(profile)
+                            traj.log_stage_end("retrieval", elapsed[0])
                         return profile, stats
                     except Exception as exc:
                         log.warning("Profile validation failed: %s", exc)
@@ -209,6 +228,8 @@ async def run_retrieval(
                 break
 
     stats.elapsed_seconds = elapsed[0]
+    if traj:
+        traj.log_stage_end("retrieval", elapsed[0])
 
     # If we get here, we exhausted the turn budget without a clean profile.
     # Make one last attempt to parse whatever we have.

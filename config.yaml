@@ -23,3 +23,6 @@ http:
 
 output:
   dir: output
+
+logs:
+  dir: logs  # trajectory JSONL files; set to "" to disable

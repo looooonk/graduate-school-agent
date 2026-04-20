@@ -13,6 +13,7 @@ import anthropic
 
 from grad_agent.config import Config
 from grad_agent.models import JudgeReport, SchoolProfile
+from grad_agent.reporting.trajectory import TrajectoryLogger
 from grad_agent.pipeline.prompts import JUDGE_SYSTEM, judge_user_prompt
 from grad_agent.reporting.stats import StageStats, timed
 from grad_agent.util.log import get_school_logger
@@ -49,6 +50,7 @@ async def run_judge(
     config: Config,
     client: anthropic.AsyncAnthropic,
     context_text: str = "",
+    traj: TrajectoryLogger | None = None,
 ) -> tuple[JudgeReport, StageStats]:
     """Evaluate a SchoolProfile and return a JudgeReport.
 
@@ -66,6 +68,9 @@ async def run_judge(
     log = get_school_logger(__name__, school_label)
     stats = StageStats(stage="judge", model=config.sonnet_model)
 
+    if traj:
+        traj.log_stage_start("judge")
+
     profile_json = profile.model_dump_json(indent=2)
 
     with timed() as elapsed:
@@ -81,6 +86,8 @@ async def run_judge(
         stats.api_calls += 1
         stats.input_tokens += response.usage.input_tokens
         stats.output_tokens += response.usage.output_tokens
+        if traj:
+            traj.log_api_response("judge", 1, config.sonnet_model, response)
 
     stats.elapsed_seconds = elapsed[0]
 
@@ -104,4 +111,7 @@ async def run_judge(
         len(report.flagged_fields),
         len(report.suggested_queries),
     )
+    if traj:
+        traj.log_judge_report(report)
+        traj.log_stage_end("judge", elapsed[0])
     return report, stats

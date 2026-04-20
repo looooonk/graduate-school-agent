@@ -14,6 +14,7 @@ import anthropic
 
 from grad_agent.config import Config
 from grad_agent.models import FitAssessment, SchoolProfile
+from grad_agent.reporting.trajectory import TrajectoryLogger
 from grad_agent.pipeline.prompts import FIT_SYSTEM, fit_user_prompt
 from grad_agent.reporting.stats import StageStats, timed
 from grad_agent.util.log import get_school_logger
@@ -50,6 +51,7 @@ async def run_fit_assessment(
     config: Config,
     client: anthropic.AsyncAnthropic,
     context_text: str = "",
+    traj: TrajectoryLogger | None = None,
 ) -> tuple[FitAssessment, StageStats]:
     """Assess applicant fit against a school profile.
 
@@ -68,6 +70,9 @@ async def run_fit_assessment(
     log = get_school_logger(__name__, school_label)
     stats = StageStats(stage="fit", model=config.sonnet_model)
 
+    if traj:
+        traj.log_stage_start("fit")
+
     profile_json = profile.model_dump_json(indent=2)
 
     with timed() as elapsed:
@@ -83,6 +88,8 @@ async def run_fit_assessment(
         stats.api_calls += 1
         stats.input_tokens += response.usage.input_tokens
         stats.output_tokens += response.usage.output_tokens
+        if traj:
+            traj.log_api_response("fit", 1, config.sonnet_model, response)
 
     stats.elapsed_seconds = elapsed[0]
 
@@ -107,4 +114,7 @@ async def run_fit_assessment(
         assessment.overall_score,
         assessment.confidence.value,
     )
+    if traj:
+        traj.log_fit_assessment(assessment)
+        traj.log_stage_end("fit", elapsed[0])
     return assessment, stats
