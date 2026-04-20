@@ -1,6 +1,6 @@
 # Graduate School Research Agent
 
-An agentic system built on the Anthropic Python SDK that autonomously researches graduate school programs and produces structured Markdown profiles. See `DESIGN.md` for the original architecture specification.
+An agentic system built on the Anthropic Python SDK that autonomously researches graduate school programs and produces structured Markdown profiles.
 
 ## Quick Start
 
@@ -67,6 +67,70 @@ grad_agent/
 6. **Output**: Per-school Markdown file + `summary.md` with priority-ranked table in `output/`. JSONL trajectory logs written to `logs/{timestamp}/` if `logs.dir` is set.
 
 Stages 2 and 3 run concurrently via `asyncio.gather`. Schools run sequentially to avoid rate limits.
+
+### Stage Details
+
+**Stage 1 — Retrieval source priority** (in rough order):
+1. Official program page (deadlines, requirements, tuition, application portal)
+2. Faculty and lab pages (research areas, advisor candidates)
+3. GradCafe and Reddit threads (applicant experiences, informal stats)
+4. Departmental news or event pages (recent highlights, culture signals)
+5. Past or sample essay prompts (from program pages or applicant blogs)
+
+Each extracted field is stored alongside its source URL to support manual verification.
+
+**Stage 2 — Judge evaluation criteria:**
+- **Coverage**: Are all required fields populated? Which are missing or thin?
+- **Source quality**: Does any field rely on a single anecdotal source where multiple corroborating sources would be expected?
+- **Consistency**: Are there contradictions across sources within the same field?
+- **Confidence flags**: Fields the judge considers unverified or low-confidence are explicitly flagged for manual review (deadlines in particular).
+
+**Stage 3 — Fit assessment dimensions:**
+- **Research alignment**: How well do the applicant's research areas and projects map to the program's stated focus and available advisors?
+- **Advisor fit**: Are there specific named faculty whose work overlaps with the applicant's background?
+- **Profile competitiveness**: How does the applicant's stats compare to informal applicant reports in the profile?
+- **Gaps**: Where is the applicant's profile weak relative to this program's apparent expectations or culture?
+
+### Data Schemas
+
+```
+SchoolProfile:
+  school_name:          str
+  program_name:         str
+  deadline:             date
+  application_fee:      str
+  requirements:
+    gre_required:       bool
+    gpa_minimum:        str (if stated)
+    statement_of_purpose: bool
+    recommendations:    int
+    other:              list[str]
+  essay_prompts:        list[str]
+  research_areas:       list[str]
+  advisor_candidates:   list[str]  # names + brief note on research fit
+  applicant_reports:
+    typical_gpa:        str
+    typical_gre:        str (if applicable)
+    acceptance_signals: str  # qualitative summary from GradCafe/Reddit
+  sources:              list[str]  # URL per field where possible
+  notes:                str        # anything notable that doesn't fit above
+
+JudgeReport:
+  overall_quality:    "pass" | "partial" | "insufficient"
+  flagged_fields:     list[{ field: str, reason: str }]
+  suggested_queries:  list[str]  # re-queries for gap-fill if gaps are critical
+  notes:              str
+
+FitAssessment:
+  overall_score:          float  # 0.0–1.0
+  research_alignment:     str    # qualitative justification
+  advisor_candidates:     list[str]  # ranked by fit
+  competitiveness:        str    # qualitative relative to applicant reports
+  gaps:                   str
+  confidence:             "high" | "medium" | "low"  # based on profile completeness
+```
+
+`FitAssessment.confidence` is set to "low" when the `SchoolProfile` has significant gaps flagged by the judge, so downstream prioritization accounts for data quality.
 
 ### TUI
 
@@ -169,11 +233,29 @@ BRAVE_API_KEY=BSA...
 **Logs directory** (`logs/`, gitignored):
 - `{YYYY-MM-DDTHHMMSS}/{school_slug}.jsonl` — full trajectory log per school per run
 
-Each profile contains: header, requirements, research & faculty, essay prompts, applicant landscape, fit summary, quality flags, and sources.
+Each profile contains:
 
-## Design Deviations
+1. **Header**: School name, program, deadline (flagged if unverified)
+2. **Requirements**: All formal requirements in a compact list
+3. **Research & Faculty**: Research areas and advisor candidates
+4. **Essay Prompts**: Verbatim if retrieved, otherwise notes on expected format
+5. **Applicant Landscape**: Summary of GradCafe/Reddit signals
+6. **Fit Summary**: Score, justification, advisor matches, gaps
+7. **Quality Flags**: Any fields the judge flagged for manual review
+8. **Sources**: Full list of URLs used
 
-Decisions resolved from `DESIGN.md` open questions:
+## Cost Profile (approximate, 20 schools)
+
+| Stage           | Model  | Est. cost/school | Est. total (20 schools) |
+|-----------------|--------|------------------|--------------------------|
+| Haiku retrieval | Haiku  | ~$0.07           | ~$1.40                   |
+| Sonnet judge    | Sonnet | ~$0.03           | ~$0.60                   |
+| Sonnet fit      | Sonnet | ~$0.04           | ~$0.80                   |
+| **Total**       |        | **~$0.14**       | **~$2.80**               |
+
+Estimates assume ~50K input tokens and ~4K output tokens per Haiku run, and ~6–10K input / ~1K output per Sonnet call. Costs scale with page fetch aggressiveness.
+
+## Design Decisions
 
 - **Turn budget**: 25, configurable via `retrieval.max_turns`
 - **Gap-fill on insufficient**: Enabled by default, configurable via `judge.retry_gap_fill`
