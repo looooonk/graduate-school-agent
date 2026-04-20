@@ -21,3 +21,4 @@ input/*
 dist/
 build/
 .claude/
+logs/
