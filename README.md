@@ -180,6 +180,18 @@ Run the test suite:
 python3 -m unittest
 ```
 
+Preview the Rich TUI with fake data and no API calls:
+
+```bash
+python3 -m tests.preview_tui
+```
+
+For a static text snapshot instead of a live preview:
+
+```bash
+python3 -m tests.preview_tui --snapshot
+```
+
 The package layout is:
 
 ```text
