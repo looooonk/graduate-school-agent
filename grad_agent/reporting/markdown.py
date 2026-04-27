@@ -114,10 +114,9 @@ def render_summary_table(
     results: list[tuple[SchoolProfile, FitAssessment | None]],
 ) -> str:
     """Render a priority-ranked summary table across all schools."""
-    # Sort by fit score descending, schools without fit last
     ranked = sorted(
         results,
-        key=lambda r: r[1].overall_score if r[1] else -1.0,
+        key=lambda r: _priority_score(r[1]),
         reverse=True,
     )
 
@@ -148,3 +147,14 @@ def _yn(val: str | bool | None) -> str:
 
 def _md_cell(value: str) -> str:
     return value.replace("|", "\\|").replace("\n", " ")
+
+
+def _priority_score(fit: FitAssessment | None) -> float:
+    if fit is None:
+        return -1.0
+    confidence_weight = {
+        "high": 1.0,
+        "medium": 0.85,
+        "low": 0.65,
+    }[fit.confidence.value]
+    return fit.overall_score * confidence_weight

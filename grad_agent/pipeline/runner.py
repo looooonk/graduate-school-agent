@@ -25,6 +25,7 @@ from grad_agent.events import (
     TurnProgress,
 )
 from grad_agent.models import (
+    ConfidenceLevel,
     FitAssessment,
     JudgeReport,
     QualityRating,
@@ -150,7 +151,14 @@ async def run_school(
                 if on_event:
                     on_event(StageStarted(school=school_label, stage="gap_fill"))
                 profile, gap_stats = await _run_gap_fill(
-                    profile, judge_report, config, client, http, on_event, traj,
+                    profile,
+                    judge_report,
+                    config,
+                    client,
+                    http,
+                    on_event,
+                    traj,
+                    context_text=context_text,
                 )
                 school_stats.stages.append(gap_stats)
 
@@ -167,6 +175,8 @@ async def run_school(
             except Exception as exc:
                 log.warning("Gap-fill pass failed: %s", exc)
                 stage_errors.append(f"Gap-fill failed: {exc}")
+
+        fit_assessment = calibrate_fit_confidence(fit_assessment, judge_report)
 
     school_stats.elapsed_seconds = total_elapsed[0]
     school_stats.success = not stage_errors
@@ -193,6 +203,7 @@ async def _run_gap_fill(
     http: httpx.AsyncClient,
     on_event: EventCallback | None = None,
     traj: TrajectoryLogger | None = None,
+    context_text: str = "",
 ) -> tuple[SchoolProfile, StageStats]:
     """Re-run a targeted retrieval pass using the judge's suggested queries.
 
@@ -204,6 +215,8 @@ async def _run_gap_fill(
         http: Async HTTP client for tool execution.
         on_event: Optional progress callback.
         traj: Optional trajectory logger.
+        context_text: Optional applicant context used to prioritise the missing
+            facts that matter most for fit.
 
     Returns:
         A tuple of (updated SchoolProfile, StageStats). Returns the original
@@ -217,19 +230,32 @@ async def _run_gap_fill(
     stats = StageStats(stage="gap_fill", model=config.haiku_model)
 
     existing_json = profile.model_dump_json(indent=2)
+    context_section = (
+        f"## Applicant Context\n\n{context_text.strip()}\n\n"
+        if context_text.strip()
+        else ""
+    )
+    flags = "\n".join(
+        f"- {flag.field}: {flag.reason}" for flag in judge_report.flagged_fields
+    ) or "- No specific flagged fields were provided."
     suggested = "\n".join(f"- {q}" for q in judge_report.suggested_queries)
 
     messages: list[dict] = [
         {
             "role": "user",
             "content": (
+                f"{context_section}"
                 f"Here is an existing SchoolProfile that was rated as insufficient:\n\n"
                 f"```json\n{existing_json}\n```\n\n"
-                f"The quality judge flagged these gaps and suggested these queries:\n"
+                f"The quality judge flagged these gaps:\n"
+                f"{flags}\n\n"
+                f"Suggested targeted queries:\n"
                 f"{suggested}\n\n"
-                f"Please run these suggested searches (and any others you think are needed) "
-                f"to fill in the missing information, then output an UPDATED complete "
-                f"SchoolProfile JSON incorporating both the existing data and new findings. "
+                f"Please run the most relevant suggested searches first, then any "
+                f"other narrow searches needed for the same flagged fields. Then output "
+                f"an UPDATED complete SchoolProfile JSON incorporating both the existing "
+                f"data and new findings. "
+                f"Preserve existing sourced facts unless new official evidence corrects them. "
                 f"You have a budget of **{config.gap_fill_max_turns} turns** total."
             ),
         },
@@ -322,6 +348,27 @@ async def _run_gap_fill(
     if traj:
         traj.log_stage_end("gap_fill", elapsed[0])
     return profile, stats
+
+
+def calibrate_fit_confidence(
+    fit: FitAssessment | None,
+    judge: JudgeReport | None,
+) -> FitAssessment | None:
+    """Align fit confidence with the judge's data-quality verdict."""
+    if fit is None or judge is None:
+        return fit
+    if judge.overall_quality == QualityRating.INSUFFICIENT:
+        target = ConfidenceLevel.LOW
+    elif (
+        judge.overall_quality == QualityRating.PARTIAL
+        and fit.confidence == ConfidenceLevel.HIGH
+    ):
+        target = ConfidenceLevel.MEDIUM
+    else:
+        return fit
+    if fit.confidence == target:
+        return fit
+    return fit.model_copy(update={"confidence": target})
 
 
 async def run_all_schools(

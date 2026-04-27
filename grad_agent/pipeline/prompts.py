@@ -41,7 +41,31 @@ letters, and other requirements
 4. Fetch full pages when snippets are insufficient.
 5. After each search/fetch cycle, mentally inventory which fields are still \
 missing and target those next.
-6. Include the source URL for every piece of information you extract.
+6. Prefer targeted searches over broad browsing. Include the school, program, \
+degree level, and missing field in most queries.
+7. Include the source URL for every piece of information you extract.
+
+## Evidence discipline
+
+- Treat official admissions, department, graduate school, and faculty pages as \
+authoritative for formal requirements, deadlines, fees, research areas, and \
+advisor candidates.
+- Verify that evidence matches the requested program, degree level, department, \
+campus, and admission cycle. Do not mix PhD, MS, professional, undergraduate, or \
+different-campus requirements unless the page explicitly applies to all of them.
+- Use GradCafe, Reddit, blogs, and forums only for applicant landscape. Summarise \
+them as anecdotal signals unless several reports point in the same direction.
+- If an application deadline, fee, or requirement is from a prior cycle, keep it \
+but say so in the field value or notes instead of presenting it as current.
+- Do not invent missing information. If a field cannot be found, leave it null or \
+empty and explain the missing item in notes.
+- Prefer 4-8 advisor candidates whose research matches the applicant context. \
+Avoid dumping a generic faculty list. Each advisor entry should include a concise \
+fit-relevant research phrase.
+- Before final output, check that sources include the official pages and any \
+informal applicant-report pages you relied on.
+- Put caveats about stale, ambiguous, or cross-program evidence in notes so the \
+judge and final report can preserve uncertainty.
 
 ## Output
 
@@ -92,7 +116,7 @@ Example of a correctly-formatted response:
   "applicant_reports": {
     "typical_gpa": "3.7–3.9",
     "typical_gre": "163Q / 158V (waived for most recent cycle)",
-    "acceptance_signals": "GradCafe reports suggest ~8% acceptance; strong research statements appear critical."
+    "acceptance_signals": "GradCafe reports suggest ~8% acceptance; research fit appears critical."
   },
   "sources": [
     "https://example.edu/cs/phd/admissions",
@@ -127,7 +151,9 @@ def retrieval_user_prompt(
         f"Use the applicant context above (if provided) to focus your search — "
         f"for example, prioritising the subfields and advisor types most relevant "
         f"to the applicant.{budget_note}\n\n"
-        f"Begin by searching for the official program page."
+        f"Begin by searching for the official program page. Spend your first "
+        f"search/fetch cycles on formal admissions facts, then faculty fit, then "
+        f"applicant-report signals."
     )
 
 
@@ -163,9 +189,11 @@ multiple corroborating sources would be expected? Deadlines and requirements \
 should ideally come from official sources.
 3. **Consistency**: Are there contradictions across different parts of the \
 profile?
-4. **Confidence**: Flag fields you consider unverified or low-confidence. \
+4. **Program match**: Flag evidence that appears to come from the wrong degree \
+level, department, campus, or admission cycle.
+5. **Confidence**: Flag fields you consider unverified or low-confidence. \
 Deadlines are especially important to flag if they come from unofficial sources.
-5. **Application cycle**: If the applicant context specifies a target admission \
+6. **Application cycle**: If the applicant context specifies a target admission \
 cycle (e.g. Fall 2027), apply the following deadline policy:
    - Deadlines published for the target cycle are ideal — note them as current.
    - Deadlines from the most recent past cycle are **acceptable proxies** — do \
@@ -175,6 +203,9 @@ verify when {target cycle} opens".
 present at all.
    - Apply the same proxy logic to application fees and requirements, which \
 change infrequently.
+7. **Actionability**: Suggested queries should be narrow enough for a short \
+gap-fill pass. Prefer queries that name the school, program, field, and missing \
+fact.
 
 ## Output
 
@@ -193,6 +224,8 @@ fields are missing or unreliable.
 - flagged_fields: every field with a quality concern.
 - suggested_queries: specific web queries that could fill the most critical \
 gaps. Only include these if overall_quality is "partial" or "insufficient".
+- suggested_queries should be ordered by impact and limited to the 3-5 best \
+queries for the available gap-fill pass.
 - notes: any additional observations.
 
 Output ONLY the JSON — no prose before or after.
@@ -238,6 +271,23 @@ with the applicant's background? Rank them by relevance.
 compare to informal applicant reports in the profile?
 4. **Gaps**: Where is the applicant's profile weak relative to this program's \
 apparent expectations or culture?
+
+## Calibration rules
+
+- Do not invent advisors or program strengths that are not in the SchoolProfile.
+- Rank advisor matches by concrete overlap with the CV and applicant context, \
+not by general prestige or title.
+- Treat stated applicant constraints from context as important fit factors. If a \
+constraint is unmet or unknown, reflect that in gaps and confidence.
+- Separate true applicant weaknesses from missing profile evidence. Missing data \
+should reduce confidence or appear as an evidence gap, not as a personal weakness.
+- Do not over-credit generic area matches. Strong alignment needs at least one \
+specific advisor, lab, project, method, or application-domain overlap.
+- Use "high" confidence only when the profile has credible advisor, research, \
+requirements, deadline, and applicant-landscape evidence. Use "low" confidence \
+when important profile evidence is missing, even if the apparent fit is strong.
+- Keep the score calibrated: excellent fit with weak evidence should generally \
+have lower confidence, not an inflated score.
 
 ## Output
 

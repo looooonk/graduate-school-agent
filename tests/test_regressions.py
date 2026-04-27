@@ -12,6 +12,7 @@ from grad_agent.models import (
     QualityRating,
     SchoolProfile,
 )
+from grad_agent.pipeline.runner import calibrate_fit_confidence
 from grad_agent.reporting.markdown import render_summary_table
 from grad_agent.reporting.trajectory import TrajectoryLogger
 from grad_agent.util.json import extract_json_object
@@ -64,6 +65,77 @@ class MarkdownTests(unittest.TestCase):
         self.assertIn("A \\| B", markdown)
         self.assertIn("MS \\| CS", markdown)
         self.assertIn("Dec \\| 1", markdown)
+
+    def test_summary_ranks_by_confidence_adjusted_score(self) -> None:
+        high_raw_low_confidence = SchoolProfile(
+            school_name="High Raw",
+            program_name="PhD CS",
+        )
+        lower_raw_high_confidence = SchoolProfile(
+            school_name="Supported",
+            program_name="PhD CS",
+        )
+        markdown = render_summary_table([
+            (
+                high_raw_low_confidence,
+                FitAssessment(
+                    overall_score=0.8,
+                    research_alignment="strong but thinly sourced",
+                    competitiveness="unknown",
+                    gaps="profile evidence is incomplete",
+                    confidence=ConfidenceLevel.LOW,
+                ),
+            ),
+            (
+                lower_raw_high_confidence,
+                FitAssessment(
+                    overall_score=0.7,
+                    research_alignment="well supported",
+                    competitiveness="strong",
+                    gaps="minor",
+                    confidence=ConfidenceLevel.HIGH,
+                ),
+            ),
+        ])
+
+        self.assertLess(
+            markdown.index("| 1 | Supported"),
+            markdown.index("| 2 | High Raw"),
+        )
+
+
+class FitCalibrationTests(unittest.TestCase):
+    def test_insufficient_judge_verdict_downgrades_fit_confidence(self) -> None:
+        fit = FitAssessment(
+            overall_score=0.75,
+            research_alignment="good",
+            competitiveness="strong",
+            gaps="some",
+            confidence=ConfidenceLevel.HIGH,
+        )
+        judge = JudgeReport(overall_quality=QualityRating.INSUFFICIENT)
+
+        calibrated = calibrate_fit_confidence(fit, judge)
+
+        self.assertIsNotNone(calibrated)
+        assert calibrated is not None
+        self.assertEqual(calibrated.confidence, ConfidenceLevel.LOW)
+
+    def test_partial_judge_verdict_caps_high_confidence_at_medium(self) -> None:
+        fit = FitAssessment(
+            overall_score=0.75,
+            research_alignment="good",
+            competitiveness="strong",
+            gaps="some",
+            confidence=ConfidenceLevel.HIGH,
+        )
+        judge = JudgeReport(overall_quality=QualityRating.PARTIAL)
+
+        calibrated = calibrate_fit_confidence(fit, judge)
+
+        self.assertIsNotNone(calibrated)
+        assert calibrated is not None
+        self.assertEqual(calibrated.confidence, ConfidenceLevel.MEDIUM)
 
 
 if __name__ == "__main__":
