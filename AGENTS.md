@@ -1,180 +1,95 @@
-# Graduate School Research Agent
+# Repository Instructions
 
-An agentic system built on the Anthropic Python SDK that autonomously researches graduate school programs and produces structured Markdown profiles.
+## Code Style
 
-## Quick Start
+- Be succinct in code, but do not compress logic into hard-to-read tricks.
+- Prefer existing helpers and local patterns over new abstractions.
+- Keep comments sparse. Do not comment code that is obvious to a programmer.
+- Use ASCII in comments. Replace non-ASCII punctuation or symbols with plain ASCII when editing comments.
+- Do not add delimiter comments such as long separator lines. Split files or functions when structure is getting too large.
+- Do not commit secrets, generated outputs, local inputs, or trajectory logs.
+
+## Project Overview
+
+This repository implements a graduate school research agent using the Anthropic Python SDK. It researches graduate programs, evaluates profile quality, assesses applicant fit against a CV, and writes Markdown reports.
+
+The installed CLI entry point is:
 
 ```bash
-# Install
-pip install -e .
-
-# Set API keys
-export ANTHROPIC_API_KEY=sk-ant-...
-export BRAVE_API_KEY=BSA...
-
-# Place your CV, school list, and optional context in input/
-cp input/schools.example.json input/schools.json  # edit with your schools
-cp input/context.example.md input/context.md      # edit with your focus areas
-# Create input/cv.md with your CV
-
-# Run
-grad-agent --schools input/schools.json --cv input/cv.md
-# context.md is loaded automatically if present; pass --context to use a different path
+grad-agent
 ```
 
-## Architecture
+Primary runtime dependencies are `anthropic`, `pydantic`, `httpx`, `pyyaml`, `python-dotenv`, and `rich`.
 
-Three-stage pipeline per school, each school fully independent:
+## Current Architecture
 
+Pipeline per school:
+
+```text
+retrieval (Haiku) -> judge (Sonnet) + fit (Sonnet) -> Markdown output
+                    -> optional gap-fill (Haiku) -> re-judge + re-fit
 ```
-retrieval (Haiku) → judge (Sonnet) + fit (Sonnet) in parallel → markdown output
-                     ↓ (if "insufficient")
-                  gap-fill (Haiku) → re-judge + re-fit
-```
 
-### Package Layout
+Important behavior:
 
-```
+- `retrieval` uses Claude Haiku with two Anthropic tools: `web_search` and `fetch_page`.
+- `web_search` calls Brave Search.
+- `fetch_page` fetches HTTP(S) URLs with `httpx`, strips HTML, and truncates to `config.max_page_chars`.
+- `judge` and `fit` run concurrently for a single school with `asyncio.gather`.
+- Gap-fill runs only when enabled, the judge returns `insufficient`, and suggested queries are present.
+- Schools are currently processed sequentially in `run_all_schools`. `max_schools_parallel` is loaded from config and CLI but is not used for parallel execution yet.
+- `http.retries` is validated in config but is not currently applied by the tool handlers.
+- Anthropic rate-limit retries are handled by `grad_agent.util.retry.api_create_with_retry`.
+
+## Package Layout
+
+```text
 grad_agent/
-├── cli.py              # Argparse CLI entry point (grad-agent command)
-├── config.py           # YAML + env-based Config dataclass
-├── events.py           # Pipeline event dataclasses + EventCallback type alias
-├── models.py           # Shared Pydantic models
-├── tui.py              # Rich-based live TUI (PipelineTUI)
-├── pipeline/
-│   ├── retrieval.py    # Stage 1 — Haiku iterative retrieval agent
-│   ├── judge.py        # Stage 2 — Sonnet quality/coverage assessment
-│   ├── fit.py          # Stage 3 — Sonnet CV-aware fit scoring
-│   ├── runner.py       # Per-school orchestration + multi-school launcher
-│   ├── prompts.py      # All system/user prompts for the three stages
-│   └── tools.py        # Tool definitions + handlers (web_search, fetch_page)
-├── reporting/
-│   ├── markdown.py     # Renders Markdown reports and summary table
-│   ├── stats.py        # Token/cost/timing statistics collection
-│   └── trajectory.py   # Per-school JSONL trajectory logger
-└── util/
-    ├── log.py          # Structured logging with per-school context
-    └── retry.py        # Exponential backoff for API calls
+  cli.py                 argparse CLI entry point
+  config.py              YAML, .env, and environment config loading
+  events.py              pipeline event dataclasses
+  models.py              Pydantic schemas
+  tui.py                 Rich live terminal UI
+  pipeline/
+    retrieval.py         Haiku retrieval loop
+    judge.py             Sonnet quality judge
+    fit.py               Sonnet CV-aware fit assessor
+    runner.py            per-school orchestration and output writing
+    prompts.py           system and user prompts
+    tools.py             Brave search and page fetch tool handlers
+  reporting/
+    markdown.py          report and summary rendering
+    stats.py             token, cost, timing, and run statistics
+    trajectory.py        per-school JSONL trajectory logger
+  util/
+    json.py              model JSON extraction
+    log.py               structured logging
+    retry.py             Anthropic rate-limit retry helper
+tests/
+  test_config_models_reporting.py
+  test_pipeline_tools_and_cli.py
+  test_regressions.py
 ```
-
-### Data Flow
-
-1. **Input**: School list (`input/schools.json`) + applicant CV (`input/cv.md`) + optional context (`input/context.md`)
-2. **Stage 1** (`pipeline/retrieval.py`): Haiku model iteratively calls `web_search` and `fetch_page` tools to populate a `SchoolProfile`. Runs up to `max_turns` (default 25). Context is injected into the initial user message to focus the search.
-3. **Stage 2** (`pipeline/judge.py`): Sonnet evaluates profile quality → `JudgeReport` with pass/partial/insufficient rating and flagged fields. Context is injected to prioritise gaps relevant to the applicant's subfield.
-4. **Stage 3** (`pipeline/fit.py`): Sonnet cross-references CV against profile → `FitAssessment` with 0.0–1.0 score. Context supplements the CV with goals and constraints not visible in the CV itself.
-5. **Gap-fill** (optional): If judge rates "insufficient" and `retry_gap_fill: true`, re-runs targeted retrieval using judge's suggested queries, then re-evaluates (context passed through here as well).
-6. **Output**: Per-school Markdown file + `summary.md` with priority-ranked table in `output/`. JSONL trajectory logs written to `logs/{timestamp}/` if `logs.dir` is set.
-
-Stages 2 and 3 run concurrently via `asyncio.gather`. Schools run sequentially to avoid rate limits.
-
-### Stage Details
-
-**Stage 1 — Retrieval source priority** (in rough order):
-1. Official program page (deadlines, requirements, tuition, application portal)
-2. Faculty and lab pages (research areas, advisor candidates)
-3. GradCafe and Reddit threads (applicant experiences, informal stats)
-4. Departmental news or event pages (recent highlights, culture signals)
-5. Past or sample essay prompts (from program pages or applicant blogs)
-
-Each extracted field is stored alongside its source URL to support manual verification.
-
-**Stage 2 — Judge evaluation criteria:**
-- **Coverage**: Are all required fields populated? Which are missing or thin?
-- **Source quality**: Does any field rely on a single anecdotal source where multiple corroborating sources would be expected?
-- **Consistency**: Are there contradictions across sources within the same field?
-- **Confidence flags**: Fields the judge considers unverified or low-confidence are explicitly flagged for manual review (deadlines in particular).
-
-**Stage 3 — Fit assessment dimensions:**
-- **Research alignment**: How well do the applicant's research areas and projects map to the program's stated focus and available advisors?
-- **Advisor fit**: Are there specific named faculty whose work overlaps with the applicant's background?
-- **Profile competitiveness**: How does the applicant's stats compare to informal applicant reports in the profile?
-- **Gaps**: Where is the applicant's profile weak relative to this program's apparent expectations or culture?
-
-### Data Schemas
-
-```
-SchoolProfile:
-  school_name:          str
-  program_name:         str
-  deadline:             date
-  application_fee:      str
-  requirements:
-    gre_required:       bool
-    gpa_minimum:        str (if stated)
-    statement_of_purpose: bool
-    recommendations:    int
-    other:              list[str]
-  essay_prompts:        list[str]
-  research_areas:       list[str]
-  advisor_candidates:   list[str]  # names + brief note on research fit
-  applicant_reports:
-    typical_gpa:        str
-    typical_gre:        str (if applicable)
-    acceptance_signals: str  # qualitative summary from GradCafe/Reddit
-  sources:              list[str]  # URL per field where possible
-  notes:                str        # anything notable that doesn't fit above
-
-JudgeReport:
-  overall_quality:    "pass" | "partial" | "insufficient"
-  flagged_fields:     list[{ field: str, reason: str }]
-  suggested_queries:  list[str]  # re-queries for gap-fill if gaps are critical
-  notes:              str
-
-FitAssessment:
-  overall_score:          float  # 0.0–1.0
-  research_alignment:     str    # qualitative justification
-  advisor_candidates:     list[str]  # ranked by fit
-  competitiveness:        str    # qualitative relative to applicant reports
-  gaps:                   str
-  confidence:             "high" | "medium" | "low"  # based on profile completeness
-```
-
-`FitAssessment.confidence` is set to "low" when the `SchoolProfile` has significant gaps flagged by the judge, so downstream prioritization accounts for data quality.
-
-### TUI
-
-When stderr is a TTY and `--verbose` is not set, `cli.py` starts a `PipelineTUI` (from `tui.py`) that replaces the root log handler and renders a live three-panel display via `rich.live.Live`:
-
-- **Header**: overall progress bar (M / N schools, cumulative cost, elapsed time)
-- **School table**: one row per school showing current stage, retrieval turn, tool-call count, elapsed time, and final cost
-- **Log tail**: last 12 log records from the pipeline
-
-If `rich` is not installed the CLI falls back to plain structured logging with no other changes. Pass `--verbose` to bypass the TUI and get full debug output to stderr.
-
-### Trajectory Logging
-
-`reporting/trajectory.py` provides `TrajectoryLogger`, a context manager that writes one JSONL file per school per run. Each line is a self-contained JSON object with an ISO-8601 timestamp and a `type` field:
-
-| type | when |
-|------|------|
-| `stage_start` | beginning of retrieval / judge / fit / gap_fill |
-| `stage_end` | end of stage (includes `elapsed_s`) |
-| `api_response` | every model API call (full content, token counts, stop_reason) |
-| `tool_result` | every tool execution (name, input, full result string) |
-| `profile` | final SchoolProfile from retrieval or gap-fill |
-| `judge_report` | JudgeReport from the judge stage |
-| `fit_assessment` | FitAssessment from the fit stage |
-
-Files are written to `logs/{YYYY-MM-DDTHHMMSS}/{school_slug}.jsonl`. Set `logs.dir: ""` in `config.yaml` to disable.
-
-### Event System
-
-`events.py` defines five dataclasses used by the TUI and any other observer:
-
-- `SchoolStarted(school, idx, total)` — emitted before each school begins
-- `StageStarted(school, stage)` — emitted before retrieval, judge+fit, and gap_fill
-- `TurnProgress(school, turn, max_turns)` — emitted at the start of each retrieval turn
-- `ToolCalled(school, tool_name)` — emitted at each tool dispatch
-- `SchoolDone(school, success, elapsed, cost)` — emitted after each school completes
-
-`EventCallback = Callable[[PipelineEvent], None]` is threaded as an optional parameter through `run_all_schools` → `run_school` → `run_retrieval` / `_run_gap_fill`.
 
 ## Configuration
 
-Non-secret settings live in `config.yaml` (YAML). API keys are environment-only (`.env`).
+`Config.load()` merges:
 
-### config.yaml
+1. built-in defaults,
+2. `config.yaml`,
+3. environment variables loaded through `.env`,
+4. explicit override values from the CLI.
+
+Secrets are environment-only:
+
+```text
+ANTHROPIC_API_KEY
+BRAVE_API_KEY
+```
+
+Do not add API keys to `config.yaml`, tests, docs examples with real values, or trajectory logs.
+
+Current `config.yaml` keys:
 
 ```yaml
 models:
@@ -201,74 +116,134 @@ output:
   dir: output
 
 logs:
-  dir: logs  # set to "" to disable trajectory logging
+  dir: logs
 ```
 
-### Environment Variables (secrets only)
+Set `logs.dir: ""` to disable trajectory logging.
 
+## CLI Behavior
+
+Supported school inputs:
+
+```bash
+grad-agent --schools input/schools.json --cv input/cv.md
+grad-agent --school "MIT" --program "PhD EECS" --cv input/cv.md
 ```
-ANTHROPIC_API_KEY=sk-ant-...
-BRAVE_API_KEY=BSA...
+
+Useful flags:
+
+- `--config PATH`: use a custom YAML config.
+- `--output DIR`: override `output.dir`.
+- `--context PATH`: inject applicant context into all stages.
+- `--max-turns N`: override retrieval turn budget.
+- `--max-parallel N`: override config only; current execution remains sequential.
+- `--no-gap-fill`: disable insufficient-profile gap-fill.
+- `--verbose`: disable the TUI and enable debug logs.
+
+Default `--context input/context.md` is skipped if missing. A user-specified context path must exist.
+
+## Inputs and Outputs
+
+Inputs:
+
+- `input/schools.json`: list of `{"school": "...", "program": "..."}` objects.
+- `input/cv.md`: applicant CV in plain text or Markdown.
+- `input/context.md`: optional applicant context.
+
+Outputs:
+
+- `output/{school}_{program}_profile.md`: one Markdown report per school.
+- `output/summary.md`: ranked Markdown summary table.
+- `logs/{YYYY-MM-DDTHHMMSS}/{school_slug}.jsonl`: optional trajectory logs.
+
+`input/`, `output/`, and `logs/` are expected to contain local or generated data. Avoid relying on non-example files in tests.
+
+## Data Models
+
+The main Pydantic models live in `grad_agent/models.py`:
+
+- `SchoolProfile`
+- `Requirements`
+- `ApplicantReports`
+- `JudgeReport`
+- `FlaggedField`
+- `FitAssessment`
+- `SchoolResult`
+
+Model validators intentionally accept common LLM output variants, such as:
+
+- string values for list fields,
+- dict deadlines flattened into a string,
+- dict advisor entries converted into display strings,
+- dict source maps converted into URL lists,
+- list notes joined into one string.
+
+Preserve these coercions unless a schema change is deliberate and covered by tests.
+
+## Reporting and Ranking
+
+`reporting/markdown.py` renders:
+
+- one complete school report from `SchoolProfile`, optional `JudgeReport`, and optional `FitAssessment`,
+- one summary table ranked by confidence-adjusted fit score.
+
+Summary priority weights are:
+
+- high confidence: `1.0`
+- medium confidence: `0.85`
+- low confidence: `0.65`
+
+`runner.calibrate_fit_confidence()` lowers fit confidence after judge results:
+
+- `insufficient` forces low confidence,
+- `partial` caps high confidence at medium.
+
+## TUI and Events
+
+When stderr is a TTY and `--verbose` is not set, `cli.py` starts `PipelineTUI`.
+
+Events are defined in `grad_agent/events.py`:
+
+- `SchoolStarted`
+- `StageStarted`
+- `TurnProgress`
+- `ToolCalled`
+- `SchoolDone`
+
+The TUI replaces root log handlers while active, then leaves the final Rich display visible.
+
+## Trajectory Logging
+
+`TrajectoryLogger` writes one JSONL file per school per run. Record types include:
+
+- `stage_start`
+- `stage_end`
+- `api_response`
+- `tool_result`
+- `profile`
+- `judge_report`
+- `fit_assessment`
+
+Trajectory logs include full model content and tool results. Treat them as potentially sensitive local artifacts.
+
+## Tests
+
+Run all tests with:
+
+```bash
+python3 -m unittest
 ```
 
-### CLI Overrides
+The tests use fakes for Anthropic and HTTP behavior. Do not make tests depend on live network calls or real API keys.
 
-`--max-turns`, `--max-parallel`, `--no-gap-fill`, `--output`, `--config` override the corresponding YAML settings for a single run.
+When changing prompts, model schemas, output rendering, config behavior, or CLI parsing, update or add focused regression tests in `tests/`.
 
-`--context` overrides the default `input/context.md` path; errors if the specified file does not exist.
+## Development Notes
 
-`--verbose` disables the TUI and enables debug-level logging to stderr.
-
-## Input / Output
-
-**Input directory** (`input/`, gitignored except examples):
-- `schools.json` — `[{"school": "...", "program": "..."}, ...]`
-- `cv.md` — applicant's CV in plain text or Markdown
-- `context.md` *(optional)* — free-form applicant context injected into every pipeline stage; use it to specify target subfields, advisor preferences, funding requirements, geographic constraints, or scoring guidance. See `context.example.md` for a template. Silently skipped if absent.
-
-**Output directory** (`output/`, gitignored):
-- `{school_name}_{program}_profile.md` — full report per school
-- `summary.md` — priority-ranked table across all schools
-
-**Logs directory** (`logs/`, gitignored):
-- `{YYYY-MM-DDTHHMMSS}/{school_slug}.jsonl` — full trajectory log per school per run
-
-Each profile contains:
-
-1. **Header**: School name, program, deadline (flagged if unverified)
-2. **Requirements**: All formal requirements in a compact list
-3. **Research & Faculty**: Research areas and advisor candidates
-4. **Essay Prompts**: Verbatim if retrieved, otherwise notes on expected format
-5. **Applicant Landscape**: Summary of GradCafe/Reddit signals
-6. **Fit Summary**: Score, justification, advisor matches, gaps
-7. **Quality Flags**: Any fields the judge flagged for manual review
-8. **Sources**: Full list of URLs used
-
-## Cost Profile (approximate, 20 schools)
-
-| Stage           | Model  | Est. cost/school | Est. total (20 schools) |
-|-----------------|--------|------------------|--------------------------|
-| Haiku retrieval | Haiku  | ~$0.07           | ~$1.40                   |
-| Sonnet judge    | Sonnet | ~$0.03           | ~$0.60                   |
-| Sonnet fit      | Sonnet | ~$0.04           | ~$0.80                   |
-| **Total**       |        | **~$0.14**       | **~$2.80**               |
-
-Estimates assume ~50K input tokens and ~4K output tokens per Haiku run, and ~6–10K input / ~1K output per Sonnet call. Costs scale with page fetch aggressiveness.
-
-## Design Decisions
-
-- **Turn budget**: 25, configurable via `retrieval.max_turns`
-- **Gap-fill on insufficient**: Enabled by default, configurable via `judge.retry_gap_fill`
-- **Search API**: Brave Search (cost-effective, good coverage, simple API)
-- **Output format**: Both per-school files and a consolidated summary table
-- **TUI**: Rich-based live display active when stderr is a TTY; degrades to plain logging otherwise
-- **Trajectory logs**: JSONL per school per run; disabled by setting `logs.dir: ""`
-
-## Dependencies
-
-- `anthropic` — Anthropic API client
-- `pydantic` — structured data validation
-- `httpx` — async HTTP for tool execution (Brave Search + page fetches)
-- `pyyaml` — YAML config loading
-- `python-dotenv` — `.env` file loading
-- `rich` — live TUI rendering (optional at runtime; plain logging used if absent)
+- Keep prompt text in `grad_agent/pipeline/prompts.py`; do not inline new stage prompts elsewhere.
+- Keep external tool schemas and handlers together in `grad_agent/pipeline/tools.py`.
+- Tool handlers should return strings suitable for LLM consumption, not structured Python objects.
+- Prefer `extract_json_object()` for parsing model JSON instead of duplicating parsing logic.
+- Use `SchoolProfile.model_validate`, `JudgeReport.model_validate`, and `FitAssessment.model_validate` at API boundaries.
+- Preserve partial-failure behavior in `run_school`: retrieval failure returns a stub result; judge, fit, and gap-fill errors are captured in stats instead of crashing the entire run.
+- Keep generated output paths filesystem-safe through `_safe_filename()`.
