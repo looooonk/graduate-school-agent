@@ -92,8 +92,6 @@ class TrajectoryLogger:
         self._file.write(json.dumps(obj, ensure_ascii=False) + "\n")
         self._file.flush()
 
-    # ── Stage lifecycle ───────────────────────────────────────────────────────
-
     def log_stage_start(self, stage: str) -> None:
         """Record the beginning of a pipeline stage."""
         self._write({"ts": _now(), "type": "stage_start", "stage": stage})
@@ -106,8 +104,6 @@ class TrajectoryLogger:
             "stage": stage,
             "elapsed_s": round(elapsed_s, 3),
         })
-
-    # ── API interaction ───────────────────────────────────────────────────────
 
     def log_api_response(
         self,
@@ -151,16 +147,26 @@ class TrajectoryLogger:
             "result": result,
         })
 
-    # ── Structured outputs ────────────────────────────────────────────────────
-
     def log_profile(self, profile: SchoolProfile) -> None:
         """Record the final SchoolProfile produced by retrieval or gap-fill."""
-        self._write({"ts": _now(), "type": "profile", "data": profile.model_dump()})
+        self._write({
+            "ts": _now(),
+            "type": "profile",
+            "data": profile.model_dump(mode="json"),
+        })
 
     def log_judge_report(self, report: JudgeReport) -> None:
         """Record the JudgeReport from the judge stage."""
-        self._write({"ts": _now(), "type": "judge_report", "data": report.model_dump()})
+        self._write({
+            "ts": _now(),
+            "type": "judge_report",
+            "data": report.model_dump(mode="json"),
+        })
 
     def log_fit_assessment(self, assessment: FitAssessment) -> None:
         """Record the FitAssessment from the fit stage."""
-        self._write({"ts": _now(), "type": "fit_assessment", "data": assessment.model_dump()})
+        self._write({
+            "ts": _now(),
+            "type": "fit_assessment",
+            "data": assessment.model_dump(mode="json"),
+        })

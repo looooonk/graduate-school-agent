@@ -75,14 +75,22 @@ class Config:
         return cls(
             anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
             brave_api_key=os.environ.get("BRAVE_API_KEY", ""),
-            haiku_model=ov.get("haiku_model", _get(raw, "models.haiku", "claude-haiku-4-5-20251001")),
+            haiku_model=ov.get(
+                "haiku_model", _get(raw, "models.haiku", "claude-haiku-4-5-20251001")
+            ),
             sonnet_model=ov.get("sonnet_model", _get(raw, "models.sonnet", "claude-sonnet-4-6")),
             max_retrieval_turns=ov.get("max_retrieval_turns", _get(raw, "retrieval.max_turns", 15)),
-            max_search_results=ov.get("max_search_results", _get(raw, "retrieval.max_search_results", 5)),
+            max_search_results=ov.get(
+                "max_search_results", _get(raw, "retrieval.max_search_results", 5)
+            ),
             max_page_chars=ov.get("max_page_chars", _get(raw, "retrieval.max_page_chars", 30_000)),
             retry_gap_fill=ov.get("retry_gap_fill", _get(raw, "judge.retry_gap_fill", True)),
-            gap_fill_max_turns=ov.get("gap_fill_max_turns", _get(raw, "judge.gap_fill_max_turns", 5)),
-            max_schools_parallel=ov.get("max_schools_parallel", _get(raw, "concurrency.max_schools_parallel", 3)),
+            gap_fill_max_turns=ov.get(
+                "gap_fill_max_turns", _get(raw, "judge.gap_fill_max_turns", 5)
+            ),
+            max_schools_parallel=ov.get(
+                "max_schools_parallel", _get(raw, "concurrency.max_schools_parallel", 3)
+            ),
             http_timeout=ov.get("http_timeout", _get(raw, "http.timeout", 20)),
             http_retries=ov.get("http_retries", _get(raw, "http.retries", 2)),
             output_dir=ov.get("output_dir", _get(raw, "output.dir", "output")),
@@ -96,8 +104,26 @@ class Config:
             errors.append("ANTHROPIC_API_KEY is required (set in environment or .env)")
         if not self.brave_api_key:
             errors.append("BRAVE_API_KEY is required (set in environment or .env)")
-        if self.max_retrieval_turns < 1:
-            errors.append("retrieval.max_turns must be >= 1")
+        errors.extend(_validate_positive_int("retrieval.max_turns", self.max_retrieval_turns))
+        errors.extend(
+            _validate_positive_int("retrieval.max_search_results", self.max_search_results)
+        )
+        errors.extend(
+            _validate_positive_int("retrieval.max_page_chars", self.max_page_chars)
+        )
+        errors.extend(
+            _validate_positive_int("judge.gap_fill_max_turns", self.gap_fill_max_turns)
+        )
+        errors.extend(
+            _validate_positive_int("concurrency.max_schools_parallel", self.max_schools_parallel)
+        )
+        errors.extend(_validate_positive_int("http.timeout", self.http_timeout))
+        if (
+            isinstance(self.http_retries, bool)
+            or not isinstance(self.http_retries, int)
+            or self.http_retries < 0
+        ):
+            errors.append("http.retries must be an integer >= 0")
         return errors
 
 
@@ -119,3 +145,9 @@ def _get(data: dict[str, Any], dotted_key: str, default: Any) -> Any:
             return default
         current = current[k]
     return current
+
+
+def _validate_positive_int(name: str, value: Any) -> list[str]:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return [f"{name} must be an integer >= 1"]
+    return []

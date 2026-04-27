@@ -20,7 +20,7 @@ def render_school_markdown(
     # --- Header ---
     deadline_str = profile.deadline or "*not found*"
     if judge and any(f.field == "deadline" for f in judge.flagged_fields):
-        deadline_str += " ⚠️ *unverified*"
+        deadline_str += " [unverified]"
 
     sections.append(
         f"# {profile.school_name} — {profile.program_name}\n\n"
@@ -131,8 +131,8 @@ def render_summary_table(
         conf = fit.confidence.value if fit else "N/A"
         deadline = profile.deadline or "N/A"
         lines.append(
-            f"| {i} | {profile.school_name} | {profile.program_name} | "
-            f"{score} | {conf} | {deadline} |"
+            f"| {i} | {_md_cell(profile.school_name)} | {_md_cell(profile.program_name)} | "
+            f"{score} | {conf} | {_md_cell(deadline)} |"
         )
 
     return "\n".join(lines) + "\n"
@@ -144,3 +144,7 @@ def _yn(val: str | bool | None) -> str:
     if isinstance(val, str):
         return val
     return "Yes" if val else "No"
+
+
+def _md_cell(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", " ")

@@ -6,44 +6,20 @@ a structured fit assessment.
 
 from __future__ import annotations
 
-import json
 import logging
-from typing import Any
 
 import anthropic
 
 from grad_agent.config import Config
 from grad_agent.models import FitAssessment, SchoolProfile
-from grad_agent.reporting.trajectory import TrajectoryLogger
 from grad_agent.pipeline.prompts import FIT_SYSTEM, fit_user_prompt
-from grad_agent.reporting.stats import StageStats, timed
+from grad_agent.reporting.stats import StageStats, add_usage, timed
+from grad_agent.reporting.trajectory import TrajectoryLogger
+from grad_agent.util.json import extract_json_object
 from grad_agent.util.log import get_school_logger
 from grad_agent.util.retry import api_create_with_retry
 
 logger = logging.getLogger(__name__)
-
-
-def _extract_json(text: str) -> dict[str, Any] | None:
-    """Extract a JSON object from model text, handling fenced blocks."""
-    stripped = text.strip()
-    if "```" in stripped:
-        for block in stripped.split("```"):
-            block = block.strip()
-            if block.startswith("json"):
-                block = block[4:].strip()
-            if block.startswith("{"):
-                try:
-                    return json.loads(block)
-                except json.JSONDecodeError:
-                    continue
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start != -1 and end > start:
-        try:
-            return json.loads(stripped[start : end + 1])
-        except json.JSONDecodeError:
-            pass
-    return None
 
 
 async def run_fit_assessment(
@@ -86,13 +62,17 @@ async def run_fit_assessment(
                 model=config.sonnet_model,
                 max_tokens=2048,
                 system=FIT_SYSTEM,
-                messages=[{"role": "user", "content": fit_user_prompt(cv_text, profile_json, context_text)}],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": fit_user_prompt(cv_text, profile_json, context_text),
+                    }
+                ],
             )
         )
 
         stats.api_calls += 1
-        stats.input_tokens += response.usage.input_tokens
-        stats.output_tokens += response.usage.output_tokens
+        add_usage(stats, response.usage)
         if traj:
             traj.log_api_response("fit", 1, config.sonnet_model, response)
 
@@ -101,7 +81,7 @@ async def run_fit_assessment(
     text_parts = [block.text for block in response.content if block.type == "text"]
     full_text = "\n".join(text_parts)
 
-    parsed = _extract_json(full_text)
+    parsed = extract_json_object(full_text)
     if parsed is None:
         log.error("Fit assessor produced no parseable JSON")
         raise RuntimeError(f"Fit assessor failed to produce valid JSON for {school_label}")

@@ -16,7 +16,14 @@ import anthropic
 import httpx
 
 from grad_agent.config import Config
-from grad_agent.events import EventCallback, SchoolDone, SchoolStarted, StageStarted, ToolCalled, TurnProgress
+from grad_agent.events import (
+    EventCallback,
+    SchoolDone,
+    SchoolStarted,
+    StageStarted,
+    ToolCalled,
+    TurnProgress,
+)
 from grad_agent.models import (
     FitAssessment,
     JudgeReport,
@@ -27,11 +34,12 @@ from grad_agent.models import (
 from grad_agent.pipeline.fit import run_fit_assessment
 from grad_agent.pipeline.judge import run_judge
 from grad_agent.pipeline.retrieval import run_retrieval
-from grad_agent.util.retry import api_create_with_retry
 from grad_agent.reporting.markdown import render_school_markdown, render_summary_table
-from grad_agent.reporting.stats import SchoolStats, StageStats, StatsCollector, timed
+from grad_agent.reporting.stats import SchoolStats, StageStats, StatsCollector, add_usage, timed
 from grad_agent.reporting.trajectory import TrajectoryLogger
+from grad_agent.util.json import extract_json_object
 from grad_agent.util.log import get_school_logger
+from grad_agent.util.retry import api_create_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -94,14 +102,18 @@ async def run_school(
         judge_stats: StageStats | None = None
         fit_assessment: FitAssessment | None = None
         fit_stats: StageStats | None = None
+        stage_errors: list[str] = []
 
         async def _run_judge() -> None:
             nonlocal judge_report, judge_stats
             try:
-                judge_report, judge_stats = await run_judge(profile, config, client, context_text, traj)
+                judge_report, judge_stats = await run_judge(
+                    profile, config, client, context_text, traj,
+                )
             except Exception as exc:
                 log.error("Judge failed: %s", exc)
                 judge_stats = StageStats(stage="judge", model=config.sonnet_model)
+                stage_errors.append(f"Judge failed: {exc}")
 
         async def _run_fit() -> None:
             nonlocal fit_assessment, fit_stats
@@ -112,6 +124,7 @@ async def run_school(
             except Exception as exc:
                 log.error("Fit assessment failed: %s", exc)
                 fit_stats = StageStats(stage="fit", model=config.sonnet_model)
+                stage_errors.append(f"Fit assessment failed: {exc}")
 
         if on_event:
             on_event(StageStarted(school=school_label, stage="judge+fit"))
@@ -141,7 +154,9 @@ async def run_school(
                 )
                 school_stats.stages.append(gap_stats)
 
-                judge_report, judge_stats2 = await run_judge(profile, config, client, context_text, traj)
+                judge_report, judge_stats2 = await run_judge(
+                    profile, config, client, context_text, traj,
+                )
                 school_stats.stages.append(judge_stats2)
                 log.info("Post-gap-fill judge verdict: %s", judge_report.overall_quality.value)
 
@@ -151,15 +166,22 @@ async def run_school(
                 school_stats.stages.append(fit_stats2)
             except Exception as exc:
                 log.warning("Gap-fill pass failed: %s", exc)
+                stage_errors.append(f"Gap-fill failed: {exc}")
 
     school_stats.elapsed_seconds = total_elapsed[0]
-    school_stats.success = True
-    log.info("Pipeline complete (%.1fs, $%.4f)", school_stats.elapsed_seconds, school_stats.total_cost_usd)
+    school_stats.success = not stage_errors
+    school_stats.error = "; ".join(stage_errors) or None
+    log.info(
+        "Pipeline complete (%.1fs, $%.4f)",
+        school_stats.elapsed_seconds,
+        school_stats.total_cost_usd,
+    )
 
     return SchoolResult(
         profile=profile,
         judge=judge_report,
         fit=fit_assessment,
+        error=school_stats.error,
     ), school_stats
 
 
@@ -188,7 +210,6 @@ async def _run_gap_fill(
         profile unchanged if the model fails to produce a valid updated one.
     """
     from grad_agent.pipeline.prompts import RETRIEVAL_SYSTEM, retrieval_turn_status
-    from grad_agent.pipeline.retrieval import _extract_json_from_text
     from grad_agent.pipeline.tools import TOOL_DEFINITIONS, dispatch_tool
 
     school_label = f"{profile.school_name} — {profile.program_name}"
@@ -204,7 +225,8 @@ async def _run_gap_fill(
             "content": (
                 f"Here is an existing SchoolProfile that was rated as insufficient:\n\n"
                 f"```json\n{existing_json}\n```\n\n"
-                f"The quality judge flagged these gaps and suggested these queries:\n{suggested}\n\n"
+                f"The quality judge flagged these gaps and suggested these queries:\n"
+                f"{suggested}\n\n"
                 f"Please run these suggested searches (and any others you think are needed) "
                 f"to fill in the missing information, then output an UPDATED complete "
                 f"SchoolProfile JSON incorporating both the existing data and new findings. "
@@ -217,7 +239,13 @@ async def _run_gap_fill(
         for turn in range(1, config.gap_fill_max_turns + 1):
             log.info("Gap-fill turn %d/%d", turn, config.gap_fill_max_turns)
             if on_event:
-                on_event(TurnProgress(school=school_label, turn=turn, max_turns=config.gap_fill_max_turns))
+                on_event(
+                    TurnProgress(
+                        school=school_label,
+                        turn=turn,
+                        max_turns=config.gap_fill_max_turns,
+                    )
+                )
 
             response = await api_create_with_retry(
                 lambda: client.messages.create(
@@ -229,8 +257,7 @@ async def _run_gap_fill(
                 )
             )
             stats.api_calls += 1
-            stats.input_tokens += response.usage.input_tokens
-            stats.output_tokens += response.usage.output_tokens
+            add_usage(stats, response.usage)
             if traj:
                 traj.log_api_response("gap_fill", turn, config.haiku_model, response)
 
@@ -265,14 +292,17 @@ async def _run_gap_fill(
                     "role": "user",
                     "content": [
                         *tool_results,
-                        {"type": "text", "text": retrieval_turn_status(turn, config.gap_fill_max_turns)},
+                        {
+                            "type": "text",
+                            "text": retrieval_turn_status(turn, config.gap_fill_max_turns),
+                        },
                     ],
                 })
 
             elif response.stop_reason == "end_turn":
                 text_parts = [b.text for b in response.content if b.type == "text"]
                 full_text = "\n".join(text_parts)
-                parsed = _extract_json_from_text(full_text)
+                parsed = extract_json_object(full_text)
                 if parsed:
                     parsed["school_name"] = profile.school_name
                     parsed["program_name"] = profile.program_name

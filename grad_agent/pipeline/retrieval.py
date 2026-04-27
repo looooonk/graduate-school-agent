@@ -7,7 +7,6 @@ or the turn budget is exhausted.
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -17,52 +16,22 @@ import httpx
 from grad_agent.config import Config
 from grad_agent.events import EventCallback, ToolCalled, TurnProgress
 from grad_agent.models import SchoolProfile
-from grad_agent.reporting.trajectory import TrajectoryLogger
-from grad_agent.pipeline.prompts import RETRIEVAL_SYSTEM, retrieval_turn_status, retrieval_user_prompt
+from grad_agent.pipeline.prompts import (
+    RETRIEVAL_SYSTEM,
+    retrieval_turn_status,
+    retrieval_user_prompt,
+)
 from grad_agent.pipeline.tools import TOOL_DEFINITIONS, dispatch_tool
-from grad_agent.reporting.stats import StageStats, timed
+from grad_agent.reporting.stats import StageStats, add_usage, timed
+from grad_agent.reporting.trajectory import TrajectoryLogger
+from grad_agent.util.json import extract_json_object
 from grad_agent.util.log import get_school_logger
 from grad_agent.util.retry import api_create_with_retry
 
 logger = logging.getLogger(__name__)
 
 
-def _extract_json_from_text(text: str) -> dict[str, Any] | None:
-    """Best-effort extraction of a JSON object from model text output.
-
-    Handles both raw JSON and ```json fenced blocks.
-    """
-    stripped = text.strip()
-
-    # Try fenced code block first
-    if "```" in stripped:
-        for block in stripped.split("```"):
-            block = block.strip()
-            if block.startswith("json"):
-                block = block[4:].strip()
-            if block.startswith("{"):
-                try:
-                    return json.loads(block)
-                except json.JSONDecodeError:
-                    continue
-
-    # Try the whole text as JSON
-    if stripped.startswith("{"):
-        try:
-            return json.loads(stripped)
-        except json.JSONDecodeError:
-            pass
-
-    # Try to find the outermost { ... }
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start != -1 and end > start:
-        try:
-            return json.loads(stripped[start : end + 1])
-        except json.JSONDecodeError:
-            pass
-
-    return None
+_extract_json_from_text = extract_json_object
 
 
 async def run_retrieval(
@@ -109,7 +78,13 @@ async def run_retrieval(
         for turn in range(1, config.max_retrieval_turns + 1):
             log.info("Turn %d/%d", turn, config.max_retrieval_turns)
             if on_event:
-                on_event(TurnProgress(school=school_label, turn=turn, max_turns=config.max_retrieval_turns))
+                on_event(
+                    TurnProgress(
+                        school=school_label,
+                        turn=turn,
+                        max_turns=config.max_retrieval_turns,
+                    )
+                )
 
             response = await api_create_with_retry(
                 lambda: client.messages.create(
@@ -122,12 +97,7 @@ async def run_retrieval(
             )
 
             stats.api_calls += 1
-            stats.input_tokens += response.usage.input_tokens
-            stats.output_tokens += response.usage.output_tokens
-            if hasattr(response.usage, "cache_read_input_tokens"):
-                stats.cache_read_tokens += response.usage.cache_read_input_tokens or 0
-            if hasattr(response.usage, "cache_creation_input_tokens"):
-                stats.cache_creation_tokens += response.usage.cache_creation_input_tokens or 0
+            add_usage(stats, response.usage)
 
             if traj:
                 traj.log_api_response("retrieval", turn, config.haiku_model, response)
@@ -167,7 +137,10 @@ async def run_retrieval(
                     "role": "user",
                     "content": [
                         *tool_results,
-                        {"type": "text", "text": retrieval_turn_status(turn, config.max_retrieval_turns)},
+                        {
+                            "type": "text",
+                            "text": retrieval_turn_status(turn, config.max_retrieval_turns),
+                        },
                     ],
                 })
 
@@ -232,7 +205,10 @@ async def run_retrieval(
     return SchoolProfile(
         school_name=school_name,
         program_name=program_name,
-        notes="WARNING: Retrieval agent exhausted turn budget without producing a complete profile.",
+        notes=(
+            "WARNING: Retrieval agent exhausted turn budget without producing "
+            "a complete profile."
+        ),
     ), stats
 
 

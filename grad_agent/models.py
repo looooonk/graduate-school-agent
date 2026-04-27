@@ -87,7 +87,11 @@ class SchoolProfile(BaseModel):
         for item in v:
             if isinstance(item, dict):
                 name = item.get("name", "")
-                research = item.get("research") or item.get("focus") or item.get("research_focus", "")
+                research = (
+                    item.get("research")
+                    or item.get("focus")
+                    or item.get("research_focus", "")
+                )
                 url = item.get("url") or item.get("profile_url", "")
                 entry = " — ".join(p for p in [name, research] if p)
                 if url:

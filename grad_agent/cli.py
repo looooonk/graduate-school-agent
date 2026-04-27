@@ -109,9 +109,22 @@ def _load_schools(args: argparse.Namespace) -> list[tuple[str, str]]:
         if not path.exists():
             print(f"Error: schools file not found: {path}", file=sys.stderr)
             sys.exit(1)
-        data = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            print(f"Error: schools file is not valid JSON: {exc}", file=sys.stderr)
+            sys.exit(1)
+        if not isinstance(data, list):
+            print("Error: schools JSON must be a list of objects", file=sys.stderr)
+            sys.exit(1)
         schools = []
         for entry in data:
+            if not isinstance(entry, dict):
+                print(
+                    f"Error: each entry in schools JSON must be an object. Got: {entry}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
             school = entry.get("school")
             program = entry.get("program")
             if not school or not program:

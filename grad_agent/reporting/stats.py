@@ -10,7 +10,7 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Generator
+from typing import Any, Generator
 
 # Approximate costs per million tokens (USD) as of 2025-04.
 _COST_PER_M: dict[str, tuple[float, float]] = {
@@ -39,11 +39,19 @@ class StageStats:
     @property
     def estimated_cost_usd(self) -> float:
         input_rate, output_rate = _COST_PER_M.get(self.model, _DEFAULT_COST)
-        effective_input = self.input_tokens - self.cache_read_tokens
+        effective_input = max(0, self.input_tokens - self.cache_read_tokens)
         cache_cost = self.cache_read_tokens * (input_rate * 0.1)  # 90% discount
         return (
             effective_input * input_rate + self.output_tokens * output_rate + cache_cost
         ) / 1_000_000
+
+
+def add_usage(stats: StageStats, usage: Any) -> None:
+    """Accumulate Anthropic token usage into stage stats."""
+    stats.input_tokens += usage.input_tokens
+    stats.output_tokens += usage.output_tokens
+    stats.cache_read_tokens += getattr(usage, "cache_read_input_tokens", 0) or 0
+    stats.cache_creation_tokens += getattr(usage, "cache_creation_input_tokens", 0) or 0
 
 
 @dataclass

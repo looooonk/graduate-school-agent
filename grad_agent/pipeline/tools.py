@@ -11,8 +11,10 @@ corresponding async handler that performs the actual I/O.
 from __future__ import annotations
 
 import html
+import json
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -68,12 +70,14 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
 # HTML stripping
 # ---------------------------------------------------------------------------
 
+_SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s{3,}")
 
 
 def _strip_html(raw: str) -> str:
     """Rough HTML → plaintext conversion. Good enough for LLM consumption."""
+    raw = _SCRIPT_STYLE_RE.sub(" ", raw)
     text = _TAG_RE.sub(" ", raw)
     text = html.unescape(text)
     text = _WS_RE.sub("\n", text)
@@ -92,7 +96,9 @@ async def handle_web_search(
 ) -> str:
     """Execute a Brave Search API query and return formatted results."""
     log = get_school_logger("tools.web_search", school)
-    query = args["query"]
+    query = str(args.get("query", "")).strip()
+    if not query:
+        return "Search failed: missing query."
     log.info("Searching: %s", query)
 
     try:
@@ -111,7 +117,12 @@ async def handle_web_search(
         log.warning("Search failed: %s", exc)
         return f"Search failed: {exc}"
 
-    data = resp.json()
+    try:
+        data = resp.json()
+    except json.JSONDecodeError as exc:
+        log.warning("Search returned invalid JSON: %s", exc)
+        return f"Search failed: invalid JSON response ({exc})"
+
     results = data.get("web", {}).get("results", [])
     if not results:
         return "No results found."
@@ -136,7 +147,10 @@ async def handle_fetch_page(
 ) -> str:
     """Fetch a URL and return stripped text content."""
     log = get_school_logger("tools.fetch_page", school)
-    url = args["url"]
+    url = str(args.get("url", "")).strip()
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return "Failed to fetch page: url must be an absolute http(s) URL."
     log.info("Fetching: %s", url)
 
     try:
