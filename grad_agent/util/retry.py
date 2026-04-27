@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 _BASE_DELAY = 60.0   # seconds — rate limit window is 1 minute
+_BACKOFF_MULTIPLIER = 1.5
 _MAX_RETRIES = 4
 
 
@@ -63,4 +64,4 @@ async def api_create_with_retry(
                 wait,
             )
             await asyncio.sleep(wait)
-            delay *= 2  # exponential backoff for subsequent misses
+            delay *= _BACKOFF_MULTIPLIER

@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from grad_agent.models import (
     ConfidenceLevel,
@@ -16,6 +17,7 @@ from grad_agent.pipeline.runner import calibrate_fit_confidence
 from grad_agent.reporting.markdown import render_summary_table
 from grad_agent.reporting.trajectory import TrajectoryLogger
 from grad_agent.util.json import extract_json_object
+from grad_agent.util import retry
 
 
 class JsonExtractionTests(unittest.TestCase):
@@ -136,6 +138,35 @@ class FitCalibrationTests(unittest.TestCase):
         self.assertIsNotNone(calibrated)
         assert calibrated is not None
         self.assertEqual(calibrated.confidence, ConfidenceLevel.MEDIUM)
+
+
+class RetryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rate_limit_backoff_uses_one_point_five_multiplier(self) -> None:
+        class FakeRateLimitError(Exception):
+            response = None
+
+        attempts = 0
+
+        async def fn() -> str:
+            nonlocal attempts
+            attempts += 1
+            if attempts < 4:
+                raise FakeRateLimitError()
+            return "ok"
+
+        sleeps: list[float] = []
+
+        async def fake_sleep(wait: float) -> None:
+            sleeps.append(wait)
+
+        with (
+            patch.object(retry.anthropic, "RateLimitError", FakeRateLimitError),
+            patch.object(retry.asyncio, "sleep", fake_sleep),
+        ):
+            result = await retry.api_create_with_retry(fn, max_retries=3)
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(sleeps, [60.0, 90.0, 135.0])
 
 
 if __name__ == "__main__":
