@@ -80,6 +80,7 @@ def _strip_html(raw: str) -> str:
     raw = _SCRIPT_STYLE_RE.sub(" ", raw)
     text = _TAG_RE.sub(" ", raw)
     text = html.unescape(text)
+    text = text.replace("\xa0", " ")
     text = _WS_RE.sub("\n", text)
     return text.strip()
 

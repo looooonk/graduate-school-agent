@@ -16,17 +16,17 @@ a ``type`` discriminator.  Event types:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from grad_agent.models import FitAssessment, JudgeReport, SchoolProfile
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
+    return datetime.now(UTC).isoformat(timespec="microseconds")
 
 
 def _serialize_content(content: list[Any]) -> list[dict[str, Any]]:

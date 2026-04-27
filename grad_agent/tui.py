@@ -29,7 +29,6 @@ from grad_agent.events import (
     TurnProgress,
 )
 
-
 _LEVEL_STYLES: dict[str, str] = {
     "DEBUG":    "dim",
     "INFO":     "green",

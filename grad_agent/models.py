@@ -7,11 +7,10 @@ exist mid-retrieval without validation failures.
 
 from __future__ import annotations
 
-from enum import Enum
-from typing import Any, Optional
+from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
-
 
 # ---------------------------------------------------------------------------
 # Stage 1 — SchoolProfile
@@ -25,10 +24,10 @@ class Requirements(BaseModel):
     model often produces more informative text than a bare yes/no.
     """
 
-    gre_required: Optional[str | bool] = None
-    gpa_minimum: Optional[str] = None
-    statement_of_purpose: Optional[str | bool] = None
-    recommendations: Optional[str | int] = None
+    gre_required: str | bool | None = None
+    gpa_minimum: str | None = None
+    statement_of_purpose: str | bool | None = None
+    recommendations: str | int | None = None
     other: list[str] = Field(default_factory=list)
 
     @field_validator("other", mode="before")
@@ -42,9 +41,9 @@ class Requirements(BaseModel):
 class ApplicantReports(BaseModel):
     """Informal stats aggregated from GradCafe, Reddit, etc."""
 
-    typical_gpa: Optional[str] = None
-    typical_gre: Optional[str] = None
-    acceptance_signals: Optional[str] = None
+    typical_gpa: str | None = None
+    typical_gre: str | None = None
+    acceptance_signals: str | None = None
 
 
 class SchoolProfile(BaseModel):
@@ -52,15 +51,15 @@ class SchoolProfile(BaseModel):
 
     school_name: str
     program_name: str
-    deadline: Optional[str] = None
-    application_fee: Optional[str] = None
+    deadline: str | None = None
+    application_fee: str | None = None
     requirements: Requirements = Field(default_factory=Requirements)
     essay_prompts: list[str] = Field(default_factory=list)
     research_areas: list[str] = Field(default_factory=list)
     advisor_candidates: list[str] = Field(default_factory=list)
     applicant_reports: ApplicantReports = Field(default_factory=ApplicantReports)
     sources: list[str] = Field(default_factory=list)
-    notes: Optional[str] = None
+    notes: str | None = None
 
     @field_validator("deadline", mode="before")
     @classmethod
@@ -121,7 +120,7 @@ class SchoolProfile(BaseModel):
 # Stage 2 — JudgeReport
 # ---------------------------------------------------------------------------
 
-class QualityRating(str, Enum):
+class QualityRating(StrEnum):
     PASS = "pass"
     PARTIAL = "partial"
     INSUFFICIENT = "insufficient"
@@ -138,14 +137,14 @@ class JudgeReport(BaseModel):
     overall_quality: QualityRating
     flagged_fields: list[FlaggedField] = Field(default_factory=list)
     suggested_queries: list[str] = Field(default_factory=list)
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 # ---------------------------------------------------------------------------
 # Stage 3 — FitAssessment
 # ---------------------------------------------------------------------------
 
-class ConfidenceLevel(str, Enum):
+class ConfidenceLevel(StrEnum):
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
@@ -170,6 +169,6 @@ class SchoolResult(BaseModel):
     """Aggregated result for a single school after all stages complete."""
 
     profile: SchoolProfile
-    judge: Optional[JudgeReport] = None
-    fit: Optional[FitAssessment] = None
-    error: Optional[str] = None
+    judge: JudgeReport | None = None
+    fit: FitAssessment | None = None
+    error: str | None = None

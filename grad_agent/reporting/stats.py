@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Generator
+from typing import Any
 
 # Approximate costs per million tokens (USD) as of 2025-04.
 _COST_PER_M: dict[str, tuple[float, float]] = {

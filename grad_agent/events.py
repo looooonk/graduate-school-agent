@@ -6,8 +6,8 @@ running without a TTY).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Union
 
 
 @dataclass
@@ -54,5 +54,5 @@ class SchoolDone:
     cost: float
 
 
-PipelineEvent = Union[SchoolStarted, StageStarted, TurnProgress, ToolCalled, SchoolDone]
+PipelineEvent = SchoolStarted | StageStarted | TurnProgress | ToolCalled | SchoolDone
 EventCallback = Callable[[PipelineEvent], None]

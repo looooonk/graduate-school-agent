@@ -16,8 +16,8 @@ from grad_agent.models import (
 from grad_agent.pipeline.runner import calibrate_fit_confidence
 from grad_agent.reporting.markdown import render_summary_table
 from grad_agent.reporting.trajectory import TrajectoryLogger
-from grad_agent.util.json import extract_json_object
 from grad_agent.util import retry
+from grad_agent.util.json import extract_json_object
 
 
 class JsonExtractionTests(unittest.TestCase):
