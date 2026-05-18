@@ -1,0 +1,2 @@
+- Implement proper parallelization for the main agentic retrieval loop
+- Tidy documentation, scripting, and configs
