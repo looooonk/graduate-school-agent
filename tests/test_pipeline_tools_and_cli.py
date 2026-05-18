@@ -42,9 +42,12 @@ def _test_config(**overrides: object) -> Config:
         "max_retrieval_turns": 2,
         "max_search_results": 3,
         "max_page_chars": 20,
+        "local_retrieval_parallel_agents": 1,
+        "local_retrieval_max_parallel_tool_calls": 8,
         "retry_gap_fill": True,
         "gap_fill_max_turns": 2,
         "max_schools_parallel": 1,
+        "max_sonnet_parallel": 1,
         "http_timeout": 5,
         "http_retries": 0,
         "output_dir": "output",
@@ -394,6 +397,70 @@ class PipelineStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats.api_calls, 2)
         self.assertEqual(stats.tool_calls, 1)
         self.assertEqual(local_client.calls[0]["model"], "Qwen/Qwen3.6-35B-A3B-FP8")
+
+    async def test_run_retrieval_uses_local_batch_tool_protocol(self) -> None:
+        local_client = FakeLocalClient(
+            [
+                fake_local_response(
+                    json.dumps(
+                        {
+                            "tools": [
+                                {
+                                    "tool": "web_search",
+                                    "args": {"query": "Example MS CS deadline"},
+                                },
+                                {
+                                    "tool": "web_search",
+                                    "args": {"query": "Example MS CS faculty"},
+                                },
+                            ],
+                        }
+                    )
+                ),
+                fake_local_response(
+                    json.dumps(
+                        {
+                            "school_name": "Wrong",
+                            "program_name": "Wrong",
+                            "deadline": "December 1",
+                            "sources": ["https://example.edu"],
+                        }
+                    )
+                ),
+            ]
+        )
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        async def fake_dispatch(
+            name: str,
+            args: dict[str, object],
+            _config: Config,
+            _http: object,
+            _school: str,
+        ) -> str:
+            calls.append((name, args))
+            return "result"
+
+        with patch.object(retrieval, "dispatch_tool", fake_dispatch):
+            profile, stats = await retrieval.run_retrieval(
+                "Example University",
+                "MS CS",
+                _test_config(retrieval_backend="local_qwen_vllm"),
+                FakeClient([]),
+                SimpleNamespace(),
+                local_client=local_client,
+            )
+
+        self.assertEqual(profile.deadline, "December 1")
+        self.assertEqual(stats.api_calls, 2)
+        self.assertEqual(stats.tool_calls, 2)
+        self.assertEqual(
+            calls,
+            [
+                ("web_search", {"query": "Example MS CS deadline"}),
+                ("web_search", {"query": "Example MS CS faculty"}),
+            ],
+        )
 
 
 class CliTests(unittest.TestCase):

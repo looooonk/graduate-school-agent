@@ -58,8 +58,12 @@ class ConfigTests(unittest.TestCase):
                         "  local_base_urls:",
                         "    - http://127.0.0.1:9001/v1",
                         "  local_timeout: 120",
+                        "  local_parallel_agents: 3",
+                        "  local_max_parallel_tool_calls: 6",
                         "  max_turns: 9",
                         "  max_search_results: 7",
+                        "concurrency:",
+                        "  max_sonnet_parallel: 4",
                         "output:",
                         "  dir: yaml-output",
                         "logs:",
@@ -91,9 +95,12 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.local_retrieval_model_count, 1)
         self.assertEqual(config.local_retrieval_base_urls, ("http://127.0.0.1:9001/v1",))
         self.assertEqual(config.local_retrieval_timeout, 120)
+        self.assertEqual(config.local_retrieval_parallel_agents, 3)
+        self.assertEqual(config.local_retrieval_max_parallel_tool_calls, 6)
         self.assertEqual(config.retrieval_model, "yaml-qwen")
         self.assertEqual(config.max_retrieval_turns, 3)
         self.assertEqual(config.max_search_results, 7)
+        self.assertEqual(config.max_sonnet_parallel, 4)
         self.assertEqual(config.output_dir, "override-output")
         self.assertEqual(config.logs_dir, "")
 
@@ -112,9 +119,12 @@ class ConfigTests(unittest.TestCase):
             max_retrieval_turns=0,
             max_search_results=True,
             max_page_chars=10,
+            local_retrieval_parallel_agents=0,
+            local_retrieval_max_parallel_tool_calls=0,
             retry_gap_fill=True,
             gap_fill_max_turns=1,
             max_schools_parallel=2,
+            max_sonnet_parallel=0,
             http_timeout=20,
             http_retries=-1,
             output_dir="output",
@@ -130,6 +140,11 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("retrieval.backend must be one of: anthropic_haiku, local_qwen_vllm", errors)
         self.assertIn("retrieval.local_model_count must be an integer >= 1", errors)
         self.assertIn("retrieval.local_timeout must be an integer >= 1", errors)
+        self.assertIn("retrieval.local_parallel_agents must be an integer >= 1", errors)
+        self.assertIn(
+            "retrieval.local_max_parallel_tool_calls must be an integer >= 1", errors
+        )
+        self.assertIn("concurrency.max_sonnet_parallel must be an integer >= 1", errors)
         self.assertIn("http.retries must be an integer >= 0", errors)
 
     def test_default_retrieval_backend_is_local_qwen(self) -> None:
@@ -146,6 +161,10 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.retrieval_backend, "local_qwen_vllm")
         self.assertEqual(config.retrieval_model, "Qwen/Qwen3.6-35B-A3B-FP8")
         self.assertEqual(config.local_retrieval_model_count, 4)
+        self.assertEqual(config.local_retrieval_parallel_agents, 4)
+        self.assertEqual(config.local_retrieval_max_parallel_tool_calls, 8)
+        self.assertEqual(config.max_schools_parallel, 8)
+        self.assertEqual(config.max_sonnet_parallel, 8)
         self.assertEqual(
             config.local_retrieval_base_urls,
             (
@@ -171,9 +190,12 @@ class ConfigTests(unittest.TestCase):
             max_retrieval_turns=2,
             max_search_results=3,
             max_page_chars=1000,
+            local_retrieval_parallel_agents=1,
+            local_retrieval_max_parallel_tool_calls=8,
             retry_gap_fill=True,
             gap_fill_max_turns=1,
             max_schools_parallel=1,
+            max_sonnet_parallel=1,
             http_timeout=10,
             http_retries=0,
             output_dir="output",

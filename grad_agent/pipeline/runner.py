@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextlib import nullcontext
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, nullcontext
 from datetime import datetime
 from pathlib import Path
 
@@ -35,7 +36,11 @@ from grad_agent.models import (
 )
 from grad_agent.pipeline.fit import run_fit_assessment
 from grad_agent.pipeline.judge import run_judge
-from grad_agent.pipeline.retrieval import run_local_profile_loop, run_retrieval
+from grad_agent.pipeline.retrieval import (
+    run_local_parallel_profile_loop,
+    run_local_profile_loop,
+    run_retrieval,
+)
 from grad_agent.reporting.markdown import render_school_markdown, render_summary_table
 from grad_agent.reporting.stats import SchoolStats, StageStats, StatsCollector, add_usage, timed
 from grad_agent.reporting.trajectory import TrajectoryLogger
@@ -57,6 +62,7 @@ async def run_school(
     on_event: EventCallback | None = None,
     traj: TrajectoryLogger | None = None,
     local_client: LocalVLLMClient | None = None,
+    sonnet_semaphore: asyncio.Semaphore | None = None,
 ) -> tuple[SchoolResult, SchoolStats]:
     """Run the full 3-stage pipeline for a single school.
 
@@ -118,9 +124,10 @@ async def run_school(
         async def _run_judge() -> None:
             nonlocal judge_report, judge_stats
             try:
-                judge_report, judge_stats = await run_judge(
-                    profile, config, client, context_text, traj,
-                )
+                async with _maybe_semaphore(sonnet_semaphore):
+                    judge_report, judge_stats = await run_judge(
+                        profile, config, client, context_text, traj,
+                    )
             except Exception as exc:
                 log.error("Judge failed: %s", exc)
                 judge_stats = StageStats(stage="judge", model=config.sonnet_model)
@@ -129,9 +136,10 @@ async def run_school(
         async def _run_fit() -> None:
             nonlocal fit_assessment, fit_stats
             try:
-                fit_assessment, fit_stats = await run_fit_assessment(
-                    cv_text, profile, config, client, context_text, traj,
-                )
+                async with _maybe_semaphore(sonnet_semaphore):
+                    fit_assessment, fit_stats = await run_fit_assessment(
+                        cv_text, profile, config, client, context_text, traj,
+                    )
             except Exception as exc:
                 log.error("Fit assessment failed: %s", exc)
                 fit_stats = StageStats(stage="fit", model=config.sonnet_model)
@@ -173,16 +181,48 @@ async def run_school(
                 )
                 school_stats.stages.append(gap_stats)
 
-                judge_report, judge_stats2 = await run_judge(
-                    profile, config, client, context_text, traj,
-                )
-                school_stats.stages.append(judge_stats2)
-                log.info("Post-gap-fill judge verdict: %s", judge_report.overall_quality.value)
+                post_judge: JudgeReport | None = None
+                post_judge_stats: StageStats | None = None
+                post_fit: FitAssessment | None = None
+                post_fit_stats: StageStats | None = None
+                post_errors: list[str] = []
 
-                fit_assessment, fit_stats2 = await run_fit_assessment(
-                    cv_text, profile, config, client, context_text, traj,
-                )
-                school_stats.stages.append(fit_stats2)
+                async def _run_post_judge() -> None:
+                    nonlocal post_judge, post_judge_stats
+                    try:
+                        async with _maybe_semaphore(sonnet_semaphore):
+                            post_judge, post_judge_stats = await run_judge(
+                                profile, config, client, context_text, traj,
+                            )
+                    except Exception as exc:
+                        log.error("Post-gap-fill judge failed: %s", exc)
+                        post_judge_stats = StageStats(stage="judge", model=config.sonnet_model)
+                        post_errors.append(f"Post-gap-fill judge failed: {exc}")
+
+                async def _run_post_fit() -> None:
+                    nonlocal post_fit, post_fit_stats
+                    try:
+                        async with _maybe_semaphore(sonnet_semaphore):
+                            post_fit, post_fit_stats = await run_fit_assessment(
+                                cv_text, profile, config, client, context_text, traj,
+                            )
+                    except Exception as exc:
+                        log.error("Post-gap-fill fit assessment failed: %s", exc)
+                        post_fit_stats = StageStats(stage="fit", model=config.sonnet_model)
+                        post_errors.append(f"Post-gap-fill fit assessment failed: {exc}")
+
+                await asyncio.gather(_run_post_judge(), _run_post_fit())
+                stage_errors.extend(post_errors)
+                if post_judge is not None:
+                    judge_report = post_judge
+                if post_fit is not None:
+                    fit_assessment = post_fit
+                if post_judge_stats:
+                    school_stats.stages.append(post_judge_stats)
+                if post_fit_stats:
+                    school_stats.stages.append(post_fit_stats)
+                if judge_report:
+                    log.info("Post-gap-fill judge verdict: %s", judge_report.overall_quality.value)
             except Exception as exc:
                 log.warning("Gap-fill pass failed: %s", exc)
                 stage_errors.append(f"Gap-fill failed: {exc}")
@@ -274,6 +314,19 @@ async def _run_gap_fill(
     ]
 
     if config.uses_local_retrieval:
+        if config.local_retrieval_parallel_agents > 1:
+            return await run_local_parallel_profile_loop(
+                school_name=profile.school_name,
+                program_name=profile.program_name,
+                config=config,
+                http=http,
+                initial_prompt=messages[0]["content"],
+                stage="gap_fill",
+                max_turns=config.gap_fill_max_turns,
+                on_event=on_event,
+                traj=traj,
+                local_client=local_client,
+            )
         return await run_local_profile_loop(
             school_name=profile.school_name,
             program_name=profile.program_name,
@@ -431,6 +484,7 @@ async def run_all_schools(
 
     client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key)
     local_client = LocalVLLMClient.from_config(config) if config.uses_local_retrieval else None
+    sonnet_semaphore = asyncio.Semaphore(config.max_sonnet_parallel)
 
     async with httpx.AsyncClient() as http:
         total = len(schools)
@@ -455,6 +509,7 @@ async def run_all_schools(
                     all_results,
                     on_event,
                     local_client,
+                    sonnet_semaphore,
                 )
 
         await asyncio.gather(
@@ -489,6 +544,7 @@ async def _run_one_school(
     all_results: list[tuple[SchoolResult, SchoolStats] | None],
     on_event: EventCallback | None,
     local_client: LocalVLLMClient | None,
+    sonnet_semaphore: asyncio.Semaphore | None,
 ) -> None:
     school_label = f"{school_name} — {program_name}"
     if on_event:
@@ -501,7 +557,7 @@ async def _run_one_school(
     with traj_ctx as traj:
         result, stats = await run_school(
             school_name, program_name, cv_text, config, client, http,
-            context_text, on_event, traj, local_client,
+            context_text, on_event, traj, local_client, sonnet_semaphore,
         )
     if on_event:
         on_event(SchoolDone(
@@ -528,3 +584,14 @@ def _safe_filename(school: str, program: str) -> str:
     while "__" in safe:
         safe = safe.replace("__", "_")
     return safe.strip("_")
+
+
+@asynccontextmanager
+async def _maybe_semaphore(
+    semaphore: asyncio.Semaphore | None,
+) -> AsyncIterator[None]:
+    if semaphore is None:
+        yield
+        return
+    async with semaphore:
+        yield

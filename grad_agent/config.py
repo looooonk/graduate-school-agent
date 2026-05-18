@@ -48,6 +48,8 @@ class Config:
     max_retrieval_turns: int
     max_search_results: int
     max_page_chars: int
+    local_retrieval_parallel_agents: int
+    local_retrieval_max_parallel_tool_calls: int
 
     # --- Judge ---
     retry_gap_fill: bool
@@ -55,6 +57,7 @@ class Config:
 
     # --- Concurrency ---
     max_schools_parallel: int
+    max_sonnet_parallel: int
 
     # --- HTTP ---
     http_timeout: int
@@ -124,12 +127,23 @@ class Config:
                 "max_search_results", _get(raw, "retrieval.max_search_results", 5)
             ),
             max_page_chars=ov.get("max_page_chars", _get(raw, "retrieval.max_page_chars", 30_000)),
+            local_retrieval_parallel_agents=ov.get(
+                "local_retrieval_parallel_agents",
+                _get(raw, "retrieval.local_parallel_agents", local_retrieval_model_count),
+            ),
+            local_retrieval_max_parallel_tool_calls=ov.get(
+                "local_retrieval_max_parallel_tool_calls",
+                _get(raw, "retrieval.local_max_parallel_tool_calls", 8),
+            ),
             retry_gap_fill=ov.get("retry_gap_fill", _get(raw, "judge.retry_gap_fill", True)),
             gap_fill_max_turns=ov.get(
                 "gap_fill_max_turns", _get(raw, "judge.gap_fill_max_turns", 5)
             ),
             max_schools_parallel=ov.get(
-                "max_schools_parallel", _get(raw, "concurrency.max_schools_parallel", 3)
+                "max_schools_parallel", _get(raw, "concurrency.max_schools_parallel", 8)
+            ),
+            max_sonnet_parallel=ov.get(
+                "max_sonnet_parallel", _get(raw, "concurrency.max_sonnet_parallel", 8)
             ),
             http_timeout=ov.get("http_timeout", _get(raw, "http.timeout", 20)),
             http_retries=ov.get("http_retries", _get(raw, "http.retries", 2)),
@@ -168,10 +182,24 @@ class Config:
             _validate_positive_int("retrieval.max_page_chars", self.max_page_chars)
         )
         errors.extend(
+            _validate_positive_int(
+                "retrieval.local_parallel_agents", self.local_retrieval_parallel_agents
+            )
+        )
+        errors.extend(
+            _validate_positive_int(
+                "retrieval.local_max_parallel_tool_calls",
+                self.local_retrieval_max_parallel_tool_calls,
+            )
+        )
+        errors.extend(
             _validate_positive_int("judge.gap_fill_max_turns", self.gap_fill_max_turns)
         )
         errors.extend(
             _validate_positive_int("concurrency.max_schools_parallel", self.max_schools_parallel)
+        )
+        errors.extend(
+            _validate_positive_int("concurrency.max_sonnet_parallel", self.max_sonnet_parallel)
         )
         errors.extend(_validate_positive_int("http.timeout", self.http_timeout))
         errors.extend(

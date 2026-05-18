@@ -146,9 +146,16 @@ or:
 
 {"tool": "fetch_page", "args": {"url": "https://..."}}
 
-Use one tool call per turn. After receiving the tool result, either request the \
-next tool using the same JSON command shape or output the final SchoolProfile \
-JSON. Do not wrap tool commands in prose or Markdown fences.
+When several searches or fetches are independent, batch them:
+
+{"tools": [
+  {"tool": "web_search", "args": {"query": "..."}},
+  {"tool": "fetch_page", "args": {"url": "https://..."}}
+]}
+
+After receiving tool results, either request the next tool batch using the same \
+JSON command shapes or output the final SchoolProfile JSON. Do not wrap tool \
+commands in prose or Markdown fences.
 """
 
 

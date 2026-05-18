@@ -45,12 +45,14 @@ Important behavior:
 
 - Default `retrieval` uses local `Qwen/Qwen3.6-35B-A3B-FP8` through the configured OpenAI-compatible vLLM endpoints.
 - The alternate retrieval backend is Claude Haiku via Anthropic native tool calls. Select it with `retrieval.backend: anthropic_haiku` or `--retrieval-backend anthropic_haiku`.
-- Local Qwen retrieval uses a strict JSON command loop for two tools: `web_search` and `fetch_page`.
+- Local Qwen retrieval uses a strict JSON command loop for two tools: `web_search` and `fetch_page`. It may emit either one tool command or a batched `tools` list per turn.
+- Local retrieval defaults to four parallel agents per school on the 4 x A100 topology. Agents focus on full profile, admissions, faculty, and applicant-report evidence, then merge into one `SchoolProfile`.
+- Anthropic Haiku retrieval can emit multiple native tool-use blocks in one response; tool handlers run concurrently.
 - `web_search` calls Brave Search.
 - `fetch_page` fetches HTTP(S) URLs with `httpx`, strips HTML, and truncates to `config.max_page_chars`.
-- `judge` and `fit` run concurrently for a single school with `asyncio.gather`.
+- `judge` and `fit` run concurrently for a single school with `asyncio.gather`, including the post-gap-fill re-judge and re-fit pass.
 - Gap-fill runs only when enabled, the judge returns `insufficient`, and suggested queries are present.
-- Schools run with bounded concurrency from `max_schools_parallel`.
+- Schools run with bounded concurrency from `max_schools_parallel`; concurrent Sonnet judge/fit calls are bounded separately by `max_sonnet_parallel`.
 - `http.retries` is applied to local vLLM endpoint failover but is not currently applied by the fetch/search tool handlers.
 - Anthropic rate-limit retries are handled by `grad_agent.util.retry.api_create_with_retry`.
 
@@ -119,6 +121,8 @@ retrieval:
   max_search_results: 5
   max_page_chars: 30000
   local_model_count: 4
+  local_parallel_agents: 4
+  local_max_parallel_tool_calls: 8
   local_base_urls:
     - http://127.0.0.1:8001/v1
     - http://127.0.0.1:8002/v1
@@ -131,7 +135,8 @@ judge:
   gap_fill_max_turns: 5
 
 concurrency:
-  max_schools_parallel: 3
+  max_schools_parallel: 8
+  max_sonnet_parallel: 8
 
 http:
   timeout: 20
@@ -157,7 +162,7 @@ http://127.0.0.1:8003/v1
 http://127.0.0.1:8004/v1
 ```
 
-For fewer or more GPUs, set `retrieval.local_model_count` to the number of model copies and provide the same number of endpoints in `retrieval.local_base_urls`. The app validates that these counts match and round-robins local retrieval calls across the endpoints.
+For fewer or more GPUs, set `retrieval.local_model_count` to the number of model copies and provide the same number of endpoints in `retrieval.local_base_urls`. Set `retrieval.local_parallel_agents` to the desired per-school local fanout, usually the endpoint count. The app validates that model count and endpoint count match, round-robins local retrieval calls across the endpoints, and lets local vLLM handle batching.
 
 Deployment helpers live in `deploy/`:
 

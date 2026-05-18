@@ -6,7 +6,7 @@ The agent is intended for application planning: it searches official program pag
 
 ## Features
 
-- Agentic retrieval loop using Claude Haiku or local Qwen through vLLM, with `web_search` and `fetch_page` tools.
+- Agentic retrieval using Claude Haiku or local Qwen through vLLM, with parallel local retrieval agents and batched `web_search` / `fetch_page` tools.
 - Quality judging with Claude Sonnet to flag missing, stale, contradictory, or weakly sourced fields.
 - CV-aware fit assessment with Claude Sonnet.
 - Optional gap-fill pass when the judge rates a profile as insufficient.
@@ -147,13 +147,14 @@ retrieval (local Qwen by default) -> judge (Sonnet) + fit (Sonnet) -> Markdown o
 Stage details:
 
 - `retrieval`: the configured retrieval backend searches the web through Brave and fetches pages with HTTPX, then emits a `SchoolProfile` JSON object.
-- `local_qwen_vllm` retrieval calls the OpenAI-compatible vLLM chat completions API and uses a JSON command loop for `web_search` and `fetch_page`.
-- `anthropic_haiku` retrieval uses Anthropic native tool calls with the same tool handlers.
+- `local_qwen_vllm` retrieval calls the OpenAI-compatible vLLM chat completions API. By default, four local agents run per school against the configured endpoints, each focused on a different evidence slice, and their profiles are merged.
+- Local retrieval can issue batched JSON tool commands in a single turn; the app executes those searches or fetches concurrently.
+- `anthropic_haiku` retrieval uses Anthropic native tool calls with the same tool handlers. Multiple tool-use blocks in one model response are executed concurrently.
 - `judge`: Claude Sonnet evaluates profile coverage, source quality, consistency, program match, cycle freshness, and actionability.
 - `fit`: Claude Sonnet compares the profile against the applicant CV and optional context.
 - `gap-fill`: if enabled, runs targeted retrieval using the judge's suggested queries when the initial profile is insufficient.
 
-Judge and fit run concurrently for a school. Schools run with bounded concurrency from `max_schools_parallel`.
+Judge and fit run concurrently for a school, including after gap-fill. Schools run with bounded concurrency from `max_schools_parallel`, and concurrent Sonnet calls are additionally bounded by `max_sonnet_parallel`.
 
 ## Configuration
 
@@ -171,6 +172,8 @@ retrieval:
   max_search_results: 5
   max_page_chars: 30000
   local_model_count: 4
+  local_parallel_agents: 4
+  local_max_parallel_tool_calls: 8
   local_base_urls:
     - http://127.0.0.1:8001/v1
     - http://127.0.0.1:8002/v1
@@ -183,7 +186,8 @@ judge:
   gap_fill_max_turns: 5
 
 concurrency:
-  max_schools_parallel: 3
+  max_schools_parallel: 8
+  max_sonnet_parallel: 8
 
 http:
   timeout: 20
@@ -217,7 +221,10 @@ Notes:
 - `BRAVE_API_KEY` is required for retrieval web search in both backends.
 - `retrieval.backend` accepts `local_qwen_vllm` or `anthropic_haiku`.
 - `retrieval.local_model_count` is the number of local model copies the app expects. It must equal the number of `retrieval.local_base_urls` endpoints.
+- `retrieval.local_parallel_agents` controls how many independent local retrieval agents run per school. The default is 4 for a 4 x A100 setup.
+- `retrieval.local_max_parallel_tool_calls` caps the number of batched local tool commands executed concurrently from one model turn.
 - Local vLLM retrieval uses the OpenAI-compatible `/chat/completions` API and round-robins across `retrieval.local_base_urls`.
+- `concurrency.max_sonnet_parallel` caps concurrent Sonnet judge and fit calls separately from school pipeline concurrency.
 - Deployment scripts read non-secret deployment settings from `config.yaml`.
 - Set `VLLM_API_KEY` only if the vLLM servers require bearer-token authentication.
 - `http.retries` is applied to local vLLM endpoint failover, but not currently applied by the fetch/search tool handlers.
@@ -225,7 +232,7 @@ Notes:
 
 ## Local vLLM Deployment
 
-The default retrieval model is `Qwen/Qwen3.6-35B-A3B-FP8`. The local topology is `retrieval.local_model_count` independent vLLM servers, one per GPU. The default topology uses four local model copies:
+The default retrieval model is `Qwen/Qwen3.6-35B-A3B-FP8`. The local topology is `retrieval.local_model_count` independent vLLM servers, one per GPU. The default topology targets a 4 x A100 instance with four local model copies:
 
 ```text
 GPU 0 -> http://127.0.0.1:8001/v1
@@ -234,17 +241,18 @@ GPU 2 -> http://127.0.0.1:8003/v1
 GPU 3 -> http://127.0.0.1:8004/v1
 ```
 
-For fewer GPUs, set `retrieval.local_model_count` to the available GPU count and provide the same number of endpoints. The deployment scripts read those values directly. For two GPUs:
+For fewer GPUs, set `retrieval.local_model_count` to the available GPU count, provide the same number of endpoints, and reduce `retrieval.local_parallel_agents` to match. The deployment scripts read the model count and endpoints directly. For two GPUs:
 
 ```yaml
 retrieval:
   local_model_count: 2
+  local_parallel_agents: 2
   local_base_urls:
     - http://127.0.0.1:8001/v1
     - http://127.0.0.1:8002/v1
 ```
 
-The app does not launch or supervise vLLM processes. It validates that `retrieval.local_model_count` matches `retrieval.local_base_urls`, then round-robins retrieval calls across those endpoints and fails over according to `http.retries`.
+The app does not launch or supervise vLLM processes. It validates that `retrieval.local_model_count` matches `retrieval.local_base_urls`, then round-robins retrieval calls across those endpoints and fails over according to `http.retries`. With local retrieval, a single school can consume multiple endpoints concurrently because the retrieval fanout assumes local batching capacity and no provider rate limit.
 
 On a fresh GPU node, install system packages, micromamba, the agent package, and vLLM with:
 

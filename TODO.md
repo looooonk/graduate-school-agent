@@ -1,2 +1,2 @@
-- Implement proper parallelization for the main agentic retrieval loop
-- Tidy documentation, scripting, and configs
+- Watch real 4 x A100 runs for Brave/API bottlenecks after local retrieval fanout
+- Consider adding CLI flags for `local_parallel_agents`, `local_max_parallel_tool_calls`, and `max_sonnet_parallel`

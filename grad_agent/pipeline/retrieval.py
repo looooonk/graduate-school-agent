@@ -7,7 +7,9 @@ or the turn budget is exhausted.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 import anthropic
@@ -34,6 +36,13 @@ logger = logging.getLogger(__name__)
 
 
 _extract_json_from_text = extract_json_object
+
+
+@dataclass(frozen=True)
+class ToolCommand:
+    name: str
+    args: dict[str, Any]
+    tool_use_id: str | None = None
 
 
 async def run_retrieval(
@@ -66,6 +75,21 @@ async def run_retrieval(
     """
     school_label = f"{school_name} — {program_name}"
     if config.uses_local_retrieval:
+        if config.local_retrieval_parallel_agents > 1:
+            return await run_local_parallel_profile_loop(
+                school_name=school_name,
+                program_name=program_name,
+                config=config,
+                http=http,
+                initial_prompt=retrieval_user_prompt(
+                    school_name, program_name, context_text, config.max_retrieval_turns,
+                ),
+                stage="retrieval",
+                max_turns=config.max_retrieval_turns,
+                on_event=on_event,
+                traj=traj,
+                local_client=local_client,
+            )
         return await run_local_profile_loop(
             school_name=school_name,
             program_name=program_name,
@@ -122,8 +146,8 @@ async def run_retrieval(
                 traj.log_api_response("retrieval", turn, config.retrieval_model, response)
 
             if response.stop_reason == "tool_use":
-                tool_results: list[dict[str, Any]] = []
                 assistant_content: list[dict[str, Any]] = []
+                commands: list[ToolCommand] = []
 
                 for block in response.content:
                     if block.type == "text":
@@ -135,21 +159,24 @@ async def run_retrieval(
                             "name": block.name,
                             "input": block.input,
                         })
-                        stats.tool_calls += 1
-                        log.info("Tool call: %s(%s)", block.name, _summarize_args(block.input))
-                        if on_event:
-                            on_event(ToolCalled(school=school_label, tool_name=block.name))
-
-                        result = await dispatch_tool(
-                            block.name, block.input, config, http, school_label,
+                        args = block.input if isinstance(block.input, dict) else {}
+                        commands.append(
+                            ToolCommand(block.name, args, block.id)
                         )
-                        if traj:
-                            traj.log_tool_result("retrieval", turn, block.name, block.input, result)
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": result,
-                        })
+
+                results = await _run_tool_commands(
+                    commands, config, http, school_label, log, stats, on_event, traj,
+                    "retrieval", turn,
+                )
+                tool_results: list[dict[str, Any]] = []
+                for command, result in results:
+                    if command.tool_use_id is None:
+                        continue
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": command.tool_use_id,
+                        "content": result,
+                    })
 
                 messages.append({"role": "assistant", "content": assistant_content})
                 messages.append({
@@ -241,6 +268,110 @@ def _summarize_args(args: dict[str, Any]) -> str:
     return str(args)
 
 
+async def _run_tool_commands(
+    commands: list[ToolCommand],
+    config: Config,
+    http: httpx.AsyncClient,
+    school_label: str,
+    log: logging.LoggerAdapter,
+    stats: StageStats,
+    on_event: EventCallback | None,
+    traj: TrajectoryLogger | None,
+    stage: str,
+    turn: int,
+) -> list[tuple[ToolCommand, str]]:
+    if not commands:
+        return []
+    for command in commands:
+        stats.tool_calls += 1
+        log.info("Tool call: %s(%s)", command.name, _summarize_args(command.args))
+        if on_event:
+            on_event(ToolCalled(school=school_label, tool_name=command.name))
+
+    raw_results = await asyncio.gather(
+        *(
+            dispatch_tool(command.name, command.args, config, http, school_label)
+            for command in commands
+        ),
+        return_exceptions=True,
+    )
+    results: list[tuple[ToolCommand, str]] = []
+    for command, raw_result in zip(commands, raw_results, strict=True):
+        result = f"Tool failed: {raw_result}" if isinstance(raw_result, Exception) else raw_result
+        if traj:
+            traj.log_tool_result(stage, turn, command.name, command.args, result)
+        results.append((command, result))
+    return results
+
+
+async def run_local_parallel_profile_loop(
+    *,
+    school_name: str,
+    program_name: str,
+    config: Config,
+    http: httpx.AsyncClient,
+    initial_prompt: str,
+    stage: str,
+    max_turns: int,
+    on_event: EventCallback | None = None,
+    traj: TrajectoryLogger | None = None,
+    local_client: LocalVLLMClient | None = None,
+) -> tuple[SchoolProfile, StageStats]:
+    school_label = f"{school_name} — {program_name}"
+    log = get_school_logger(__name__, school_label)
+    client = local_client or LocalVLLMClient.from_config(config)
+    agent_prompts = _parallel_local_prompts(initial_prompt, config.local_retrieval_parallel_agents)
+    aggregate = StageStats(stage=stage, model=config.retrieval_model)
+
+    with timed() as elapsed:
+        results = await asyncio.gather(
+            *(
+                run_local_profile_loop(
+                    school_name=school_name,
+                    program_name=program_name,
+                    config=config,
+                    http=http,
+                    initial_prompt=prompt,
+                    stage=f"{stage}:{label}",
+                    max_turns=max_turns,
+                    on_event=on_event,
+                    traj=traj,
+                    local_client=client,
+                )
+                for label, prompt in agent_prompts
+            ),
+            return_exceptions=True,
+        )
+
+    profiles: list[SchoolProfile] = []
+    for item in results:
+        if isinstance(item, Exception):
+            log.warning("Parallel %s worker failed: %s", stage, item)
+            continue
+        profile, stats = item
+        _accumulate_stats(aggregate, stats)
+        if _profile_has_evidence(profile):
+            profiles.append(profile)
+
+    aggregate.elapsed_seconds = elapsed[0]
+    if profiles:
+        profile = _merge_profiles(school_name, program_name, profiles)
+        log.info("Merged %d parallel %s profiles", len(profiles), stage)
+        if traj:
+            traj.log_profile(profile)
+        return profile, aggregate
+
+    log.warning("Parallel %s workers produced no usable profile", stage)
+    return SchoolProfile(
+        school_name=school_name,
+        program_name=program_name,
+        notes=(
+            "WARNING: Parallel retrieval workers exhausted their turn budgets "
+            "without producing a usable profile."
+        ),
+    ), aggregate
+
+
 async def run_local_profile_loop(
     *,
     school_name: str,
@@ -300,22 +431,33 @@ async def run_local_profile_loop(
                 continue
 
             tool_name = parsed.get("tool")
-            if isinstance(tool_name, str):
-                args = parsed.get("args")
-                if not isinstance(args, dict):
-                    args = {}
-                stats.tool_calls += 1
-                log.info("Tool call: %s(%s)", tool_name, _summarize_args(args))
-                if on_event:
-                    on_event(ToolCalled(school=school_label, tool_name=tool_name))
-                result = await dispatch_tool(tool_name, args, config, http, school_label)
-                if traj:
-                    traj.log_tool_result(stage, turn, tool_name, args, result)
+            commands = _local_tool_commands(
+                parsed, config.local_retrieval_max_parallel_tool_calls
+            )
+            if tool_name or commands:
+                if not commands:
+                    log.warning("Invalid local tool command on turn %d", turn)
+                    messages.append({"role": "assistant", "content": full_text})
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "Your tool command was invalid. Output a JSON object "
+                            "with tool and args, or tools as a list of commands."
+                        ),
+                    })
+                    continue
+                results = await _run_tool_commands(
+                    commands, config, http, school_label, log, stats, on_event, traj, stage, turn,
+                )
+                result_text = "\n\n".join(
+                    f"Tool result for {command.name}:\n\n{result}"
+                    for command, result in results
+                )
                 messages.append({"role": "assistant", "content": full_text})
                 messages.append({
                     "role": "user",
                     "content": (
-                        f"Tool result for {tool_name}:\n\n{result}\n\n"
+                        f"{result_text}\n\n"
                         f"{retrieval_turn_status(turn, max_turns)}"
                     ),
                 })
@@ -359,3 +501,160 @@ async def run_local_profile_loop(
             "a complete profile."
         ),
     ), stats
+
+
+def _local_tool_commands(parsed: dict[str, Any], max_count: int) -> list[ToolCommand]:
+    tool_name = parsed.get("tool")
+    if isinstance(tool_name, str):
+        args = parsed.get("args")
+        return [ToolCommand(tool_name, args if isinstance(args, dict) else {})]
+
+    raw_tools = parsed.get("tools") or parsed.get("tool_calls") or parsed.get("commands")
+    if not isinstance(raw_tools, list):
+        return []
+
+    commands: list[ToolCommand] = []
+    for item in raw_tools[:max_count]:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("tool") or item.get("name")
+        if not isinstance(name, str):
+            continue
+        args = item.get("args") or item.get("input") or {}
+        commands.append(ToolCommand(name, args if isinstance(args, dict) else {}))
+    return commands
+
+
+def _parallel_local_prompts(initial_prompt: str, count: int) -> list[tuple[str, str]]:
+    focuses = [
+        ("full", "Build the strongest complete profile you can."),
+        (
+            "admissions",
+            "Prioritize official admissions facts: deadlines, fee, GRE, GPA, SOP, "
+            "recommendations, requirements, and essay prompts.",
+        ),
+        (
+            "faculty",
+            "Prioritize department research areas, labs, and advisor candidates "
+            "that match the applicant context.",
+        ),
+        (
+            "applicants",
+            "Prioritize applicant reports, GradCafe or Reddit signals, acceptance "
+            "patterns, and competitiveness evidence.",
+        ),
+    ]
+    prompts: list[tuple[str, str]] = []
+    for idx in range(count):
+        label, focus = focuses[idx] if idx < len(focuses) else (f"full{idx + 1}", focuses[0][1])
+        prompts.append((
+            label,
+            (
+                f"{initial_prompt}\n\n"
+                f"Parallel retrieval focus: {focus} Search independently. "
+                f"Return a complete SchoolProfile JSON with any missing fields left "
+                f"empty rather than guessed."
+            ),
+        ))
+    return prompts
+
+
+def _accumulate_stats(target: StageStats, source: StageStats) -> None:
+    target.input_tokens += source.input_tokens
+    target.output_tokens += source.output_tokens
+    target.cache_read_tokens += source.cache_read_tokens
+    target.cache_creation_tokens += source.cache_creation_tokens
+    target.api_calls += source.api_calls
+    target.tool_calls += source.tool_calls
+
+
+def _profile_has_evidence(profile: SchoolProfile) -> bool:
+    return any(
+        [
+            profile.deadline,
+            profile.application_fee,
+            profile.requirements.model_dump(exclude_none=True, exclude_defaults=True),
+            profile.essay_prompts,
+            profile.research_areas,
+            profile.advisor_candidates,
+            profile.applicant_reports.model_dump(exclude_none=True, exclude_defaults=True),
+            profile.sources,
+        ]
+    )
+
+
+def _merge_profiles(
+    school_name: str,
+    program_name: str,
+    profiles: list[SchoolProfile],
+) -> SchoolProfile:
+    merged = SchoolProfile(school_name=school_name, program_name=program_name)
+    merged.deadline = _first_text(profile.deadline for profile in profiles)
+    merged.application_fee = _first_text(profile.application_fee for profile in profiles)
+    merged.requirements.gre_required = _first_value(
+        profile.requirements.gre_required for profile in profiles
+    )
+    merged.requirements.gre_policy = _first_value(
+        profile.requirements.gre_policy for profile in profiles
+    )
+    merged.requirements.gpa_minimum = _first_text(
+        profile.requirements.gpa_minimum for profile in profiles
+    )
+    merged.requirements.statement_of_purpose = _first_value(
+        profile.requirements.statement_of_purpose for profile in profiles
+    )
+    merged.requirements.recommendations = _first_value(
+        profile.requirements.recommendations for profile in profiles
+    )
+    merged.requirements.other = _unique(
+        item for profile in profiles for item in profile.requirements.other
+    )
+    merged.essay_prompts = _unique(
+        item for profile in profiles for item in profile.essay_prompts
+    )
+    merged.research_areas = _unique(
+        item for profile in profiles for item in profile.research_areas
+    )
+    merged.advisor_candidates = _unique(
+        item for profile in profiles for item in profile.advisor_candidates
+    )
+    merged.applicant_reports.typical_gpa = _first_text(
+        profile.applicant_reports.typical_gpa for profile in profiles
+    )
+    merged.applicant_reports.typical_gre = _first_text(
+        profile.applicant_reports.typical_gre for profile in profiles
+    )
+    merged.applicant_reports.acceptance_signals = _first_text(
+        profile.applicant_reports.acceptance_signals for profile in profiles
+    )
+    merged.sources = _unique(item for profile in profiles for item in profile.sources)
+    merged.notes = "\n".join(
+        _unique(profile.notes for profile in profiles if profile.notes)
+    ) or None
+    return merged
+
+
+def _first_text(values: Any) -> str | None:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def _first_value(values: Any) -> Any:
+    for value in values:
+        if value is not None and value != "":
+            return value
+    return None
+
+
+def _unique(values: Any) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
