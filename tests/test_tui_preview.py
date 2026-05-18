@@ -12,6 +12,10 @@ class TuiPreviewTests(unittest.TestCase):
         self.assertIn("Graduate School Research Agent", snapshot)
         self.assertIn("Stanford University - MS Computer Science", snapshot)
         self.assertIn("MIT - PhD Electrical Engineering and Computer Science", snapshot)
+        self.assertIn("local 4 models, 4 agents/school, 8 tools/turn, 4 endpoints", snapshot)
+        self.assertIn("parallel 8 schools, 8 Sonnet", snapshot)
+        self.assertIn("full 8/25, adm 7/25", snapshot)
+        self.assertIn("batch 4", snapshot)
         self.assertIn("gap-fill", snapshot)
         self.assertIn("Fetched faculty directory and research group pages", snapshot)
 

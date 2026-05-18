@@ -278,11 +278,11 @@ Events are defined in `grad_agent/events.py`:
 
 - `SchoolStarted`
 - `StageStarted`
-- `TurnProgress`
-- `ToolCalled`
+- `TurnProgress` with optional stage and worker labels for parallel retrieval
+- `ToolCalled` with optional stage, worker, and tool batch size
 - `SchoolDone`
 
-The TUI replaces root log handlers while active, then leaves the final Rich display visible.
+The TUI replaces root log handlers while active, then leaves the final Rich display visible. Its header summarizes retrieval backend, local vLLM topology, local agent and tool fanout, and school/Sonnet concurrency; school rows show per-worker retrieval turns for local parallel runs.
 
 ## Trajectory Logging
 

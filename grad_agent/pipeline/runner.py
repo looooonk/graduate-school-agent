@@ -349,6 +349,7 @@ async def _run_gap_fill(
                         school=school_label,
                         turn=turn,
                         max_turns=config.gap_fill_max_turns,
+                        stage="gap_fill",
                     )
                 )
 
@@ -381,7 +382,11 @@ async def _run_gap_fill(
                         })
                         stats.tool_calls += 1
                         if on_event:
-                            on_event(ToolCalled(school=school_label, tool_name=block.name))
+                            on_event(ToolCalled(
+                                school=school_label,
+                                tool_name=block.name,
+                                stage="gap_fill",
+                            ))
                         result = await dispatch_tool(
                             block.name, block.input, config, http, school_label,
                         )

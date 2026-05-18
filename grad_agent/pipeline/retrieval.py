@@ -126,6 +126,7 @@ async def run_retrieval(
                         school=school_label,
                         turn=turn,
                         max_turns=config.max_retrieval_turns,
+                        stage="retrieval",
                     )
                 )
 
@@ -286,7 +287,14 @@ async def _run_tool_commands(
         stats.tool_calls += 1
         log.info("Tool call: %s(%s)", command.name, _summarize_args(command.args))
         if on_event:
-            on_event(ToolCalled(school=school_label, tool_name=command.name))
+            base_stage, worker = _event_stage_parts(stage)
+            on_event(ToolCalled(
+                school=school_label,
+                tool_name=command.name,
+                stage=base_stage,
+                worker=worker,
+                batch_size=len(commands),
+            ))
 
     raw_results = await asyncio.gather(
         *(
@@ -403,7 +411,14 @@ async def run_local_profile_loop(
         for turn in range(1, max_turns + 1):
             log.info("%s turn %d/%d", stage, turn, max_turns)
             if on_event:
-                on_event(TurnProgress(school=school_label, turn=turn, max_turns=max_turns))
+                base_stage, worker = _event_stage_parts(stage)
+                on_event(TurnProgress(
+                    school=school_label,
+                    turn=turn,
+                    max_turns=max_turns,
+                    stage=base_stage,
+                    worker=worker,
+                ))
 
             response = await client.create(
                 http,
@@ -523,6 +538,13 @@ def _local_tool_commands(parsed: dict[str, Any], max_count: int) -> list[ToolCom
         args = item.get("args") or item.get("input") or {}
         commands.append(ToolCommand(name, args if isinstance(args, dict) else {}))
     return commands
+
+
+def _event_stage_parts(stage: str) -> tuple[str, str]:
+    if ":" not in stage:
+        return stage, ""
+    base, worker = stage.split(":", 1)
+    return base, worker
 
 
 def _parallel_local_prompts(initial_prompt: str, count: int) -> list[tuple[str, str]]:

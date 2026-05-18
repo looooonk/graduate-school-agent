@@ -34,6 +34,8 @@ class TurnProgress:
     school: str
     turn: int
     max_turns: int
+    stage: str = ""
+    worker: str = ""
 
 
 @dataclass
@@ -42,6 +44,9 @@ class ToolCalled:
 
     school: str
     tool_name: str
+    stage: str = ""
+    worker: str = ""
+    batch_size: int = 1
 
 
 @dataclass

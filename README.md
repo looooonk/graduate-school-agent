@@ -203,6 +203,17 @@ deploy:
   host: 0.0.0.0
   vllm_args:
     - --trust-remote-code
+    - --gpu-memory-utilization
+    - "0.95"
+    - --enable-prefix-caching
+    - --enable-chunked-prefill
+    - --max-num-batched-tokens
+    - "32768"
+    - --max-num-seqs
+    - "256"
+    - --kv-cache-dtype
+    - fp8_e5m2
+    - --disable-log-requests
   log_dir: logs/vllm
   micromamba_env: graduate-school-agent
   python_version: "3.11"
@@ -281,6 +292,11 @@ Preview the Rich TUI with fake data and no API calls:
 ```bash
 python3 -m tests.preview_tui
 ```
+
+The TUI header shows retrieval backend, local vLLM model/endpoint topology,
+local agent fanout, tool-call fanout, and school/Sonnet concurrency. Each
+school row shows the active stage, per-worker retrieval turns for parallel
+local runs, largest observed tool batch, elapsed time, and final cost.
 
 For a static text snapshot instead of a live preview:
 

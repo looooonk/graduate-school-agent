@@ -213,7 +213,7 @@ def main() -> None:
     if sys.stderr.isatty() and not args.verbose:
         try:
             from grad_agent.tui import PipelineTUI
-            tui = PipelineTUI(total=len(schools))
+            tui = PipelineTUI(total=len(schools), config=config)
             tui.start()
             on_event = tui.on_event
         except ImportError:

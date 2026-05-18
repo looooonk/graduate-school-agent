@@ -1,8 +1,8 @@
 """Rich-based live TUI for pipeline progress display.
 
 Renders three stacked panels that refresh at ~4 fps:
-  - header: overall progress bar (M / N schools, cost, elapsed)
-  - school table: one row per school with stage, turn, tool-call count, time
+  - header: overall progress bar, cost, elapsed, and run topology
+  - school table: one row per school with stage, worker turns, tools, time
   - log tail: the last 12 log records from the pipeline
 """
 
@@ -11,8 +11,9 @@ from __future__ import annotations
 import io
 import logging
 import time
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass, field
+from typing import Any
 
 from rich.console import Console, Group
 from rich.live import Live
@@ -82,6 +83,70 @@ _STAGE_LABELS: dict[str, tuple[str, str]] = {
     "failed":    ("bold red", "failed ✗"),
 }
 
+_WORKER_SHORT_LABELS: dict[str, str] = {
+    "full":       "full",
+    "admissions": "adm",
+    "faculty":    "fac",
+    "applicants": "app",
+}
+
+
+@dataclass(frozen=True)
+class TUIRunSettings:
+    retrieval_backend: str = ""
+    retrieval_model: str = ""
+    local_model_count: int = 0
+    local_parallel_agents: int = 0
+    local_max_parallel_tool_calls: int = 0
+    local_endpoint_count: int = 0
+    max_schools_parallel: int = 0
+    max_sonnet_parallel: int = 0
+
+    @classmethod
+    def from_config(cls, config: Any) -> TUIRunSettings:
+        return cls(
+            retrieval_backend=getattr(config, "retrieval_backend", ""),
+            retrieval_model=getattr(config, "retrieval_model", ""),
+            local_model_count=getattr(config, "local_retrieval_model_count", 0),
+            local_parallel_agents=getattr(config, "local_retrieval_parallel_agents", 0),
+            local_max_parallel_tool_calls=getattr(
+                config, "local_retrieval_max_parallel_tool_calls", 0
+            ),
+            local_endpoint_count=len(getattr(config, "local_retrieval_base_urls", ()) or ()),
+            max_schools_parallel=getattr(config, "max_schools_parallel", 0),
+            max_sonnet_parallel=getattr(config, "max_sonnet_parallel", 0),
+        )
+
+    def summary(self) -> str:
+        parts: list[str] = []
+        if self.retrieval_backend:
+            model = f"/{self.retrieval_model}" if self.retrieval_model else ""
+            parts.append(f"retrieval {self.retrieval_backend}{model}")
+        if self.retrieval_backend == "local_qwen_vllm":
+            parts.append(
+                "local "
+                f"{self.local_model_count} models, "
+                f"{self.local_parallel_agents} agents/school, "
+                f"{self.local_max_parallel_tool_calls} tools/turn, "
+                f"{self.local_endpoint_count} endpoints"
+            )
+        concurrency: list[str] = []
+        if self.max_schools_parallel:
+            concurrency.append(f"{self.max_schools_parallel} schools")
+        if self.max_sonnet_parallel:
+            concurrency.append(f"{self.max_sonnet_parallel} Sonnet")
+        if concurrency:
+            parts.append("parallel " + ", ".join(concurrency))
+        return " | ".join(parts)
+
+
+@dataclass
+class _WorkerProgress:
+    turn: int = 0
+    max_turns: int = 0
+    tool_calls: int = 0
+    stage: str = ""
+
 
 @dataclass
 class _SchoolRow:
@@ -91,6 +156,9 @@ class _SchoolRow:
     turn: int = 0
     max_turns: int = 0
     tool_calls: int = 0
+    max_tool_batch: int = 1
+    tool_names: Counter[str] = field(default_factory=Counter)
+    workers: dict[str, _WorkerProgress] = field(default_factory=dict)
     done: bool = False
     success: bool = True
     elapsed: float = 0.0
@@ -124,12 +192,13 @@ class _TUILogHandler(logging.Handler):
 class _Renderable:
     """Mutable object whose ``__rich__`` method is called on every Live refresh."""
 
-    def __init__(self, total: int) -> None:
+    def __init__(self, total: int, settings: TUIRunSettings | None = None) -> None:
         """
         Args:
             total: Total number of schools in this run; used for the progress bar.
         """
         self.total = total
+        self.settings = settings or TUIRunSettings()
         self.done_count = 0
         self.rows: dict[str, _SchoolRow] = {}
         self.log_buffer: deque[tuple[str, str, str]] = deque(maxlen=12)
@@ -154,6 +223,9 @@ class _Renderable:
         txt.append(bar + "  ", style="green")
         txt.append(f"{n} / {t} schools", style="bold white")
         txt.append(f"    ${total_cost:.4f}    {elapsed:.0f}s elapsed", style="dim")
+        settings_summary = self.settings.summary()
+        if settings_summary:
+            txt.append("\n" + settings_summary, style="dim")
         return Panel(txt, title="[bold]Graduate School Research Agent[/bold]", expand=True)
 
     def _render_table(self) -> Table:
@@ -166,15 +238,15 @@ class _Renderable:
         )
         tbl.add_column("School",  ratio=5, overflow="ellipsis", no_wrap=True)
         tbl.add_column("Stage",   ratio=2)
-        tbl.add_column("Turn",    justify="right", ratio=1)
-        tbl.add_column("Tools",   justify="right", ratio=1)
+        tbl.add_column("Turns",   ratio=3, overflow="fold")
+        tbl.add_column("Tools",   ratio=2, overflow="ellipsis")
         tbl.add_column("Time",    justify="right", ratio=1)
         tbl.add_column("Cost",    justify="right", ratio=1)
 
         for row in sorted(self.rows.values(), key=lambda r: r.idx):
             style, stage_label = _STAGE_LABELS.get(row.stage, ("", row.stage))
-            turn_str = f"{row.turn}/{row.max_turns}" if row.max_turns else "—"
-            tool_str = str(row.tool_calls) if row.tool_calls else "—"
+            turn_str = _format_worker_turns(row)
+            tool_str = _format_tools(row)
             cost_str = f"${row.cost:.3f}" if row.done else "…"
             tbl.add_row(
                 row.label,
@@ -209,9 +281,28 @@ class _Renderable:
                 r = self.rows[event.school]
                 r.turn = event.turn
                 r.max_turns = event.max_turns
+                if event.stage:
+                    r.stage = event.stage
+                worker = _worker_key(event.worker)
+                r.workers[worker] = _WorkerProgress(
+                    turn=event.turn,
+                    max_turns=event.max_turns,
+                    tool_calls=r.workers.get(worker, _WorkerProgress()).tool_calls,
+                    stage=event.stage,
+                )
         elif isinstance(event, ToolCalled):
             if event.school in self.rows:
-                self.rows[event.school].tool_calls += 1
+                r = self.rows[event.school]
+                if event.stage:
+                    r.stage = event.stage
+                worker = _worker_key(event.worker)
+                r.tool_calls += 1
+                r.max_tool_batch = max(r.max_tool_batch, event.batch_size)
+                r.tool_names[event.tool_name] += 1
+                progress = r.workers.setdefault(worker, _WorkerProgress())
+                progress.tool_calls += 1
+                if event.stage:
+                    progress.stage = event.stage
         elif isinstance(event, SchoolDone):
             if event.school in self.rows:
                 r = self.rows[event.school]
@@ -223,39 +314,137 @@ class _Renderable:
             self.done_count += 1
 
 
+def _worker_key(worker: str) -> str:
+    return worker or "main"
+
+
+def _format_worker_turns(row: _SchoolRow) -> str:
+    if not row.workers:
+        return f"{row.turn}/{row.max_turns}" if row.max_turns else "—"
+
+    workers = {
+        name: worker
+        for name, worker in row.workers.items()
+        if worker.stage == row.stage
+    } or row.workers
+
+    if set(workers) == {"main"}:
+        worker = workers["main"]
+        return f"{worker.turn}/{worker.max_turns}" if worker.max_turns else "—"
+
+    parts: list[str] = []
+    for name, worker in sorted(workers.items(), key=lambda item: _worker_sort_key(item[0])):
+        label = _WORKER_SHORT_LABELS.get(name, name[:4])
+        value = f"{worker.turn}/{worker.max_turns}" if worker.max_turns else "—"
+        parts.append(f"{label} {value}")
+    return ", ".join(parts)
+
+
+def _worker_sort_key(name: str) -> tuple[int, str]:
+    order = ["full", "admissions", "faculty", "applicants", "main"]
+    try:
+        return order.index(name), name
+    except ValueError:
+        return len(order), name
+
+
+def _format_tools(row: _SchoolRow) -> str:
+    if not row.tool_calls:
+        return "—"
+    pieces = [str(row.tool_calls)]
+    if row.max_tool_batch > 1:
+        pieces.append(f"batch {row.max_tool_batch}")
+    if row.tool_names:
+        names = ", ".join(
+            f"{name.replace('_', ' ')} {count}"
+            for name, count in row.tool_names.most_common(2)
+        )
+        pieces.append(names)
+    return " | ".join(pieces)
+
+
 def demo_tui_events() -> tuple[PipelineEvent, ...]:
     """Return fake pipeline events for a no-token TUI preview."""
     labels = [f"{school} - {program}" for school, program in _DEMO_SCHOOLS]
     return (
         SchoolStarted(school=labels[0], idx=1, total=len(labels)),
         StageStarted(school=labels[0], stage="retrieval"),
-        TurnProgress(school=labels[0], turn=8, max_turns=25),
-        ToolCalled(school=labels[0], tool_name="web_search"),
-        ToolCalled(school=labels[0], tool_name="fetch_page"),
-        ToolCalled(school=labels[0], tool_name="fetch_page"),
+        TurnProgress(school=labels[0], turn=8, max_turns=25, stage="retrieval", worker="full"),
+        TurnProgress(
+            school=labels[0], turn=7, max_turns=25, stage="retrieval", worker="admissions"
+        ),
+        TurnProgress(school=labels[0], turn=7, max_turns=25, stage="retrieval", worker="faculty"),
+        TurnProgress(
+            school=labels[0], turn=6, max_turns=25, stage="retrieval", worker="applicants"
+        ),
+        ToolCalled(
+            school=labels[0], tool_name="web_search", stage="retrieval",
+            worker="full", batch_size=4,
+        ),
+        ToolCalled(
+            school=labels[0], tool_name="fetch_page", stage="retrieval",
+            worker="admissions", batch_size=4,
+        ),
+        ToolCalled(
+            school=labels[0], tool_name="fetch_page", stage="retrieval",
+            worker="faculty", batch_size=4,
+        ),
         StageStarted(school=labels[0], stage="judge+fit"),
         SchoolDone(school=labels[0], success=True, elapsed=193.0, cost=0.0362),
         SchoolStarted(school=labels[1], idx=2, total=len(labels)),
         StageStarted(school=labels[1], stage="retrieval"),
-        TurnProgress(school=labels[1], turn=25, max_turns=25),
-        ToolCalled(school=labels[1], tool_name="web_search"),
-        ToolCalled(school=labels[1], tool_name="fetch_page"),
+        TurnProgress(school=labels[1], turn=25, max_turns=25, stage="retrieval", worker="full"),
+        ToolCalled(
+            school=labels[1], tool_name="web_search", stage="retrieval",
+            worker="full", batch_size=2,
+        ),
+        ToolCalled(
+            school=labels[1], tool_name="fetch_page", stage="retrieval",
+            worker="full", batch_size=2,
+        ),
         StageStarted(school=labels[1], stage="gap_fill"),
-        TurnProgress(school=labels[1], turn=3, max_turns=5),
+        TurnProgress(school=labels[1], turn=3, max_turns=5, stage="gap_fill"),
         SchoolStarted(school=labels[2], idx=3, total=len(labels)),
         StageStarted(school=labels[2], stage="retrieval"),
-        TurnProgress(school=labels[2], turn=14, max_turns=25),
-        ToolCalled(school=labels[2], tool_name="web_search"),
-        ToolCalled(school=labels[2], tool_name="fetch_page"),
-        ToolCalled(school=labels[2], tool_name="fetch_page"),
-        ToolCalled(school=labels[2], tool_name="fetch_page"),
+        TurnProgress(school=labels[2], turn=14, max_turns=25, stage="retrieval", worker="full"),
+        TurnProgress(
+            school=labels[2], turn=11, max_turns=25, stage="retrieval", worker="faculty"
+        ),
+        ToolCalled(
+            school=labels[2], tool_name="web_search", stage="retrieval",
+            worker="full", batch_size=3,
+        ),
+        ToolCalled(
+            school=labels[2], tool_name="fetch_page", stage="retrieval",
+            worker="full", batch_size=3,
+        ),
+        ToolCalled(
+            school=labels[2], tool_name="fetch_page", stage="retrieval",
+            worker="faculty", batch_size=3,
+        ),
+        ToolCalled(
+            school=labels[2], tool_name="fetch_page", stage="retrieval",
+            worker="faculty", batch_size=3,
+        ),
         SchoolStarted(school=labels[3], idx=4, total=len(labels)),
     )
 
 
 def build_demo_renderable() -> _Renderable:
     """Build a filled TUI state for visual checks and snapshot tests."""
-    renderable = _Renderable(total=len(_DEMO_SCHOOLS))
+    renderable = _Renderable(
+        total=len(_DEMO_SCHOOLS),
+        settings=TUIRunSettings(
+            retrieval_backend="local_qwen_vllm",
+            retrieval_model="Qwen/Qwen3.6-35B-A3B-FP8",
+            local_model_count=4,
+            local_parallel_agents=4,
+            local_max_parallel_tool_calls=8,
+            local_endpoint_count=4,
+            max_schools_parallel=8,
+            max_sonnet_parallel=8,
+        ),
+    )
     for event in demo_tui_events():
         renderable.on_event(event)
 
@@ -282,7 +471,19 @@ def render_demo_snapshot(width: int = 120) -> str:
 
 def run_demo_tui(frame_delay: float = 0.35, hold_seconds: float = 5.0) -> None:
     """Play fake events through the live TUI without API calls."""
-    tui = PipelineTUI(total=len(_DEMO_SCHOOLS))
+    tui = PipelineTUI(
+        total=len(_DEMO_SCHOOLS),
+        settings=TUIRunSettings(
+            retrieval_backend="local_qwen_vllm",
+            retrieval_model="Qwen/Qwen3.6-35B-A3B-FP8",
+            local_model_count=4,
+            local_parallel_agents=4,
+            local_max_parallel_tool_calls=8,
+            local_endpoint_count=4,
+            max_schools_parallel=8,
+            max_sonnet_parallel=8,
+        ),
+    )
     tui.start()
     try:
         for idx, event in enumerate(demo_tui_events()):
@@ -314,12 +515,21 @@ class PipelineTUI:
             tui.stop()
     """
 
-    def __init__(self, total: int) -> None:
+    def __init__(
+        self,
+        total: int,
+        config: Any | None = None,
+        settings: TUIRunSettings | None = None,
+    ) -> None:
         """
         Args:
             total: Total number of schools to be processed; drives the progress bar.
+            config: Optional pipeline config shown in the run header.
+            settings: Optional explicit run settings, mainly for demos and tests.
         """
-        self._renderable = _Renderable(total=total)
+        if config is not None and settings is None:
+            settings = TUIRunSettings.from_config(config)
+        self._renderable = _Renderable(total=total, settings=settings)
         self._live = Live(
             self._renderable,
             refresh_per_second=4,
