@@ -3,22 +3,25 @@
 *.ptnnp
 *.pth
 *.pyc
-__pycache__/
 *.tar.gz
 *-ubyte
 *-ubyte.gz
 *.pt
 *.bkp
-.vscode/
+
 *.env
 
-# Project-specific
-output/
-input/*
-!input/.gitkeep
-!input/schools.example.json
+__pycache__/
 *.egg-info/
+.vscode/
 dist/
 build/
 .claude/
+
+# Project-specific
+
+output/
+input/*
+!input/schools.example.json
+!input/context.example.md
 logs/
