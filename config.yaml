@@ -36,3 +36,18 @@ output:
 
 logs:
   dir: logs
+
+deploy:
+  vast:
+    host: 0.0.0.0
+    vllm_args:
+      - --trust-remote-code
+    log_dir: logs/vllm
+    micromamba_env: graduate-school-agent
+    python_version: "3.11"
+    system_packages:
+      - curl
+      - git
+      - build-essential
+    pip_packages:
+      - vllm

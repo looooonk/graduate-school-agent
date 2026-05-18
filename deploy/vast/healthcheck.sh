@@ -1,24 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODEL_ID="${MODEL_ID:-Qwen/Qwen3.6-35B-A3B-FP8}"
-START_PORT="${START_PORT:-8001}"
-MODEL_COUNT="${MODEL_COUNT:-1}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "${script_dir}/load-config-env.sh"
 
-if ! [[ "$MODEL_COUNT" =~ ^[1-9][0-9]*$ ]]; then
-  echo "MODEL_COUNT must be an integer >= 1" >&2
+if ! [[ "$VAST_MODEL_COUNT" =~ ^[1-9][0-9]*$ ]]; then
+  echo "retrieval.local_model_count must be an integer >= 1" >&2
   exit 1
 fi
 
-for ((gpu = 0; gpu < MODEL_COUNT; gpu++)); do
-  port=$((START_PORT + gpu))
-  curl -fsS "http://127.0.0.1:${port}/v1/chat/completions" \
+read -r -a endpoints <<<"$VAST_VLLM_ENDPOINTS"
+if [[ "${#endpoints[@]}" -ne "$VAST_MODEL_COUNT" ]]; then
+  echo "retrieval.local_base_urls must provide one endpoint per local model" >&2
+  exit 1
+fi
+
+for ((idx = 0; idx < VAST_MODEL_COUNT; idx++)); do
+  endpoint="${endpoints[$idx]%/}"
+  curl -fsS "${endpoint}/chat/completions" \
     -H "Content-Type: application/json" \
     --data "{
-      \"model\": \"${MODEL_ID}\",
+      \"model\": \"${VAST_MODEL_ID}\",
       \"messages\": [{\"role\": \"user\", \"content\": \"Return OK.\"}],
       \"max_tokens\": 8,
       \"temperature\": 0
     }" >/dev/null
-  echo "port ${port}: ok"
+  echo "${endpoint}: ok"
 done

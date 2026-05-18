@@ -1,22 +1,27 @@
 # Vast.ai vLLM deployment
 
-This directory contains thin launch scripts for independent vLLM servers, one
-per GPU. The Python app only calls OpenAI-compatible endpoints; it does not
-manage model server processes.
+This directory contains launch scripts for independent vLLM servers, one per
+GPU. The Python app only calls OpenAI-compatible endpoints; it does not manage
+model server processes.
 
-Install vLLM on the node, then start the servers:
+All non-secret Vast deployment values come from the repository `config.yaml`.
+The scripts derive the model from `models.local_retrieval`, the instance count
+and ports from `retrieval.local_model_count` and `retrieval.local_base_urls`,
+and vLLM launch settings from `deploy.vast`.
+
+On a fresh Vast.ai node, run:
 
 ```bash
-cd deploy/vast
-cp env.example .env
-set -a
-. ./.env
-set +a
-./start-vllm.sh
+deploy/vast/setup-node.sh
 ```
 
-`MODEL_COUNT` controls how many one-GPU model copies to launch. The default
-endpoints match `config.yaml`:
+Then start the servers:
+
+```bash
+deploy/vast/start-vllm.sh
+```
+
+The default endpoints are:
 
 ```text
 http://127.0.0.1:8001/v1
@@ -25,11 +30,8 @@ http://127.0.0.1:8003/v1
 http://127.0.0.1:8004/v1
 ```
 
-For fewer GPUs, set both the deployment count and agent endpoints. For two GPUs:
-
-```bash
-MODEL_COUNT=2 ./start-vllm.sh
-```
+For fewer GPUs, edit `config.yaml` so the model count and endpoints match the
+node. For two GPUs:
 
 ```yaml
 retrieval:
@@ -39,20 +41,26 @@ retrieval:
     - http://127.0.0.1:8002/v1
 ```
 
-The scripts map model copy `N` to GPU `N` and port `START_PORT + N`. Do not set
-vLLM tensor parallelism here; this project expects one full model copy per GPU.
+The scripts map endpoint `N` to GPU `N`. Do not set vLLM tensor parallelism
+here; this project expects one full model copy per GPU.
 
 Check all configured instances:
 
 ```bash
-./healthcheck.sh
+deploy/vast/healthcheck.sh
 ```
 
 Run the agent against local retrieval:
 
 ```bash
-grad-agent --schools input/schools.json --cv input/cv.md \
+micromamba run -n graduate-school-agent grad-agent --schools input/schools.json --cv input/cv.md \
   --retrieval-backend local_qwen_vllm
 ```
 
-Set `VLLM_API_KEY` only if you start vLLM with API-key enforcement.
+Set `ANTHROPIC_API_KEY` and `BRAVE_API_KEY` in the shell or root `.env` before
+running the agent. Set `VLLM_API_KEY` only if you start vLLM with API-key
+enforcement.
+
+`env.example` is only a convenience shim for interactive shells. It sources the
+same `config.yaml` loader used by the scripts and does not duplicate deployment
+values.

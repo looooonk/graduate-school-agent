@@ -51,12 +51,7 @@ Optional applicant context can be placed at `input/context.md`. It is injected i
 Start the local retrieval servers if you are using the default config:
 
 ```bash
-cd deploy/vast
-cp env.example .env
-set -a
-. ./.env
-set +a
-./start-vllm.sh
+deploy/vast/start-vllm.sh
 ```
 
 In another shell, check the configured endpoints:
@@ -199,6 +194,21 @@ output:
 
 logs:
   dir: logs
+
+deploy:
+  vast:
+    host: 0.0.0.0
+    vllm_args:
+      - --trust-remote-code
+    log_dir: logs/vllm
+    micromamba_env: graduate-school-agent
+    python_version: "3.11"
+    system_packages:
+      - curl
+      - git
+      - build-essential
+    pip_packages:
+      - vllm
 ```
 
 Notes:
@@ -209,7 +219,7 @@ Notes:
 - `retrieval.backend` accepts `local_qwen_vllm` or `anthropic_haiku`.
 - `retrieval.local_model_count` is the number of local model copies the app expects. It must equal the number of `retrieval.local_base_urls` endpoints.
 - Local vLLM retrieval uses the OpenAI-compatible `/chat/completions` API and round-robins across `retrieval.local_base_urls`.
-- Vast.ai launch scripts start `MODEL_COUNT` one-GPU vLLM instances in `deploy/vast/`.
+- Vast.ai launch scripts read non-secret deployment settings from `config.yaml`.
 - Set `VLLM_API_KEY` only if the vLLM servers require bearer-token authentication.
 - `http.retries` is applied to local vLLM endpoint failover, but not currently applied by the fetch/search tool handlers.
 - Set `logs.dir: ""` to disable trajectory logging.
@@ -225,7 +235,7 @@ GPU 2 -> http://127.0.0.1:8003/v1
 GPU 3 -> http://127.0.0.1:8004/v1
 ```
 
-For fewer GPUs, set `retrieval.local_model_count` to the available GPU count, provide the same number of endpoints, and start the deployment scripts with matching `MODEL_COUNT`. For two GPUs:
+For fewer GPUs, set `retrieval.local_model_count` to the available GPU count and provide the same number of endpoints. The deployment scripts read those values directly. For two GPUs:
 
 ```yaml
 retrieval:
@@ -235,19 +245,21 @@ retrieval:
     - http://127.0.0.1:8002/v1
 ```
 
-```bash
-MODEL_COUNT=2 deploy/vast/start-vllm.sh
-```
-
 The app does not launch or supervise vLLM processes. It validates that `retrieval.local_model_count` matches `retrieval.local_base_urls`, then round-robins retrieval calls across those endpoints and fails over according to `http.retries`.
 
-On a Vast.ai node, install vLLM in the runtime environment, then use:
+On a fresh Vast.ai node, install system packages, micromamba, the agent package, and vLLM with:
+
+```bash
+deploy/vast/setup-node.sh
+```
+
+Then start the configured vLLM servers:
 
 ```bash
 deploy/vast/start-vllm.sh
 ```
 
-The script accepts environment overrides such as `MODEL_ID`, `MODEL_COUNT`, `HOST`, `START_PORT`, `VLLM_ARGS`, and `LOG_DIR`. See `deploy/vast/README.md` for the deployment-specific flow.
+Launch settings such as host, vLLM args, log directory, environment name, and setup packages live under `deploy.vast` in `config.yaml`. See `deploy/vast/README.md` for the deployment-specific flow.
 
 ## Development
 

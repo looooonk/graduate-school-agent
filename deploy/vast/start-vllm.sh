@@ -1,29 +1,48 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODEL_ID="${MODEL_ID:-Qwen/Qwen3.6-35B-A3B-FP8}"
-HOST="${HOST:-0.0.0.0}"
-START_PORT="${START_PORT:-8001}"
-MODEL_COUNT="${MODEL_COUNT:-1}"
-VLLM_ARGS="${VLLM_ARGS:---trust-remote-code}"
-LOG_DIR="${LOG_DIR:-logs/vllm}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "${script_dir}/load-config-env.sh"
 
-if ! [[ "$MODEL_COUNT" =~ ^[1-9][0-9]*$ ]]; then
-  echo "MODEL_COUNT must be an integer >= 1" >&2
+if ! [[ "$VAST_MODEL_COUNT" =~ ^[1-9][0-9]*$ ]]; then
+  echo "retrieval.local_model_count must be an integer >= 1" >&2
   exit 1
 fi
 
-mkdir -p "$LOG_DIR"
+read -r -a ports <<<"$VAST_VLLM_PORTS"
+read -r -a vllm_args <<<"$VAST_VLLM_ARGS"
+if [[ -n "${VLLM_API_KEY:-}" ]]; then
+  vllm_args+=(--api-key "$VLLM_API_KEY")
+fi
+if [[ "${#ports[@]}" -ne "$VAST_MODEL_COUNT" ]]; then
+  echo "retrieval.local_base_urls must provide one port per local model" >&2
+  exit 1
+fi
 
-for ((gpu = 0; gpu < MODEL_COUNT; gpu++)); do
-  port=$((START_PORT + gpu))
-  echo "starting ${MODEL_ID} on GPU ${gpu}, port ${port}"
+runner=()
+if ! command -v vllm >/dev/null 2>&1; then
+  micromamba_bin="$(command -v micromamba || true)"
+  if [[ -z "$micromamba_bin" && -x "${HOME}/.local/bin/micromamba" ]]; then
+    micromamba_bin="${HOME}/.local/bin/micromamba"
+  fi
+  if [[ -z "$micromamba_bin" ]]; then
+    echo "vllm is not on PATH and micromamba is unavailable; run setup-node.sh first" >&2
+    exit 1
+  fi
+  runner=("$micromamba_bin" run -n "$VAST_MICROMAMBA_ENV")
+fi
+
+mkdir -p "$VAST_VLLM_LOG_DIR"
+
+for ((gpu = 0; gpu < VAST_MODEL_COUNT; gpu++)); do
+  port="${ports[$gpu]}"
+  echo "starting ${VAST_MODEL_ID} on GPU ${gpu}, port ${port}"
   CUDA_VISIBLE_DEVICES="$gpu" \
-    vllm serve "$MODEL_ID" \
-      --host "$HOST" \
+    "${runner[@]}" vllm serve "$VAST_MODEL_ID" \
+      --host "$VAST_VLLM_HOST" \
       --port "$port" \
-      $VLLM_ARGS \
-      >"${LOG_DIR}/vllm-${gpu}.log" 2>&1 &
+      "${vllm_args[@]}" \
+      >"${VAST_VLLM_LOG_DIR}/vllm-${gpu}.log" 2>&1 &
 done
 
 wait
