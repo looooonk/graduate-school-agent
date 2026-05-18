@@ -21,6 +21,17 @@ grad-agent
 
 Primary runtime dependencies are `anthropic`, `pydantic`, `httpx`, `pyyaml`, `python-dotenv`, and `rich`.
 
+## Development Environment
+
+Use the local micromamba environment named `graduate-school-agent` for development commands:
+
+```bash
+micromamba run -n graduate-school-agent python3 -m unittest
+micromamba run -n graduate-school-agent ruff check .
+```
+
+The environment name is local-specific. If it is unavailable, use an equivalent Python 3.11+ environment with the project dependencies and `ruff` installed.
+
 ## Current Architecture
 
 Pipeline per school:
@@ -233,10 +244,16 @@ Trajectory logs include full model content and tool results. Treat them as poten
 Run all tests with:
 
 ```bash
-python3 -m unittest
+micromamba run -n graduate-school-agent python3 -m unittest
 ```
 
-The tests use fakes for Anthropic and HTTP behavior. Do not make tests depend on live network calls or real API keys.
+Run lint checks with:
+
+```bash
+micromamba run -n graduate-school-agent ruff check .
+```
+
+All source changes should pass unit tests and `ruff check .`. Do not run the full `grad-agent` program for routine validation because it can spend API tokens. The tests use fakes for Anthropic and HTTP behavior. Do not make tests depend on live network calls or real API keys.
 
 When changing prompts, model schemas, output rendering, config behavior, or CLI parsing, update or add focused regression tests in `tests/`.
 
