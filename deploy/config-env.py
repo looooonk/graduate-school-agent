@@ -109,7 +109,7 @@ def _parse_scalar(value: str) -> Any:
 def _deployment_values(config: dict[str, Any], config_dir: Path) -> dict[str, str | int]:
     retrieval = _dict_at(config, "retrieval")
     models = _dict_at(config, "models")
-    vast = _dict_at(config, "deploy.vast")
+    deploy = _dict_at(config, "deploy")
 
     model_id = _as_str(models.get("local_retrieval", "Qwen/Qwen3.6-35B-A3B-FP8"))
     endpoints = _as_list(retrieval.get("local_base_urls", []))
@@ -118,27 +118,29 @@ def _deployment_values(config: dict[str, Any], config_dir: Path) -> dict[str, st
     )
     if len(endpoints) != model_count:
         raise ValueError(
-            "retrieval.local_model_count must match retrieval.local_base_urls for Vast deployment"
+            "retrieval.local_model_count must match retrieval.local_base_urls for deployment"
         )
 
     ports = [_endpoint_port(endpoint) for endpoint in endpoints]
-    log_dir = _resolve_path(config_dir, _as_str(vast.get("log_dir", "logs/vllm")))
-    vllm_args = vast.get("vllm_args", ["--trust-remote-code"])
-    system_packages = vast.get("system_packages", list(DEFAULT_SYSTEM_PACKAGES))
-    pip_packages = vast.get("pip_packages", list(DEFAULT_PIP_PACKAGES))
+    log_dir = _resolve_path(config_dir, _as_str(deploy.get("log_dir", "logs/vllm")))
+    vllm_args = deploy.get("vllm_args", ["--trust-remote-code"])
+    system_packages = deploy.get("system_packages", list(DEFAULT_SYSTEM_PACKAGES))
+    pip_packages = deploy.get("pip_packages", list(DEFAULT_PIP_PACKAGES))
 
     return {
-        "VAST_MODEL_ID": model_id,
-        "VAST_MODEL_COUNT": model_count,
-        "VAST_VLLM_ENDPOINTS": " ".join(endpoints),
-        "VAST_VLLM_PORTS": " ".join(str(port) for port in ports),
-        "VAST_VLLM_HOST": _as_str(vast.get("host", "0.0.0.0")),
-        "VAST_VLLM_ARGS": " ".join(_as_list(vllm_args)),
-        "VAST_VLLM_LOG_DIR": str(log_dir),
-        "VAST_MICROMAMBA_ENV": _as_str(vast.get("micromamba_env", "graduate-school-agent")),
-        "VAST_PYTHON_VERSION": _as_str(vast.get("python_version", "3.11")),
-        "VAST_SYSTEM_PACKAGES": " ".join(_as_list(system_packages)),
-        "VAST_PIP_PACKAGES": " ".join(_as_list(pip_packages)),
+        "DEPLOY_MODEL_ID": model_id,
+        "DEPLOY_MODEL_COUNT": model_count,
+        "DEPLOY_VLLM_ENDPOINTS": " ".join(endpoints),
+        "DEPLOY_VLLM_PORTS": " ".join(str(port) for port in ports),
+        "DEPLOY_VLLM_HOST": _as_str(deploy.get("host", "0.0.0.0")),
+        "DEPLOY_VLLM_ARGS": " ".join(_as_list(vllm_args)),
+        "DEPLOY_VLLM_LOG_DIR": str(log_dir),
+        "DEPLOY_MICROMAMBA_ENV": _as_str(
+            deploy.get("micromamba_env", "graduate-school-agent")
+        ),
+        "DEPLOY_PYTHON_VERSION": _as_str(deploy.get("python_version", "3.11")),
+        "DEPLOY_SYSTEM_PACKAGES": " ".join(_as_list(system_packages)),
+        "DEPLOY_PIP_PACKAGES": " ".join(_as_list(pip_packages)),
     }
 
 

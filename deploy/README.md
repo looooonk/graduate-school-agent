@@ -1,24 +1,24 @@
-# Vast.ai vLLM deployment
+# vLLM deployment
 
 This directory contains launch scripts for independent vLLM servers, one per
 GPU. The Python app only calls OpenAI-compatible endpoints; it does not manage
 model server processes.
 
-All non-secret Vast deployment values come from the repository `config.yaml`.
+All non-secret deployment values come from the repository `config.yaml`.
 The scripts derive the model from `models.local_retrieval`, the instance count
 and ports from `retrieval.local_model_count` and `retrieval.local_base_urls`,
-and vLLM launch settings from `deploy.vast`.
+and vLLM launch settings from `deploy`.
 
-On a fresh Vast.ai node, run:
+On a fresh GPU node, run:
 
 ```bash
-deploy/vast/setup-node.sh
+deploy/setup-node.sh
 ```
 
 Then start the servers:
 
 ```bash
-deploy/vast/start-vllm.sh
+deploy/start-vllm.sh
 ```
 
 The default endpoints are:
@@ -47,7 +47,7 @@ here; this project expects one full model copy per GPU.
 Check all configured instances:
 
 ```bash
-deploy/vast/healthcheck.sh
+deploy/healthcheck.sh
 ```
 
 Run the agent against local retrieval:

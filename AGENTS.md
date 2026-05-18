@@ -159,10 +159,10 @@ http://127.0.0.1:8004/v1
 
 For fewer or more GPUs, set `retrieval.local_model_count` to the number of model copies and provide the same number of endpoints in `retrieval.local_base_urls`. The app validates that these counts match and round-robins local retrieval calls across the endpoints.
 
-Deployment helpers live in `deploy/vast/`:
+Deployment helpers live in `deploy/`:
 
 ```bash
-cd deploy/vast
+cd deploy
 cp env.example .env
 set -a
 . ./.env
@@ -173,7 +173,7 @@ set +a
 Health check:
 
 ```bash
-deploy/vast/healthcheck.sh
+deploy/healthcheck.sh
 ```
 
 Run with the default local retrieval backend:
@@ -188,7 +188,7 @@ Switch retrieval back to Anthropic Haiku when local endpoints are unavailable:
 grad-agent --schools input/schools.json --cv input/cv.md --retrieval-backend anthropic_haiku
 ```
 
-The Python app does not launch or supervise vLLM. Keep server startup and Vast.ai machine setup in `deploy/vast/` scripts and docs.
+The Python app does not launch or supervise vLLM. Keep server startup and node setup in `deploy/` scripts and docs.
 
 ## CLI Behavior
 

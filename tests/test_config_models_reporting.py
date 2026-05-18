@@ -217,7 +217,7 @@ class ConfigTests(unittest.TestCase):
             ("http://127.0.0.1:8001/v1", "http://127.0.0.1:8002/v1"),
         )
 
-    def test_vast_config_env_uses_config_yaml_values(self) -> None:
+    def test_deploy_config_env_uses_config_yaml_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "config.yaml"
             config_path.write_text(
@@ -231,39 +231,38 @@ class ConfigTests(unittest.TestCase):
                         "    - http://127.0.0.1:9101/v1",
                         "    - http://127.0.0.1:9102/v1",
                         "deploy:",
-                        "  vast:",
-                        "    host: 0.0.0.0",
-                        "    vllm_args:",
-                        "      - --trust-remote-code",
-                        "      - --dtype",
-                        "      - auto",
-                        "    log_dir: node-logs/vllm",
-                        "    micromamba_env: test-env",
-                        "    python_version: '3.11'",
-                        "    pip_packages:",
-                        "      - vllm==1.0.0",
+                        "  host: 0.0.0.0",
+                        "  vllm_args:",
+                        "    - --trust-remote-code",
+                        "    - --dtype",
+                        "    - auto",
+                        "  log_dir: node-logs/vllm",
+                        "  micromamba_env: test-env",
+                        "  python_version: '3.11'",
+                        "  pip_packages:",
+                        "    - vllm==1.0.0",
                     ]
                 ),
                 encoding="utf-8",
             )
-            script = Path(__file__).parents[1] / "deploy" / "vast" / "config-env.py"
+            script = Path(__file__).parents[1] / "deploy" / "config-env.py"
 
             output = subprocess.check_output(
                 [sys.executable, str(script), str(config_path)], text=True
             )
 
         exports = _parse_shell_exports(output)
-        self.assertEqual(exports["VAST_MODEL_ID"], "test/model")
-        self.assertEqual(exports["VAST_MODEL_COUNT"], "2")
-        self.assertEqual(exports["VAST_VLLM_PORTS"], "9101 9102")
+        self.assertEqual(exports["DEPLOY_MODEL_ID"], "test/model")
+        self.assertEqual(exports["DEPLOY_MODEL_COUNT"], "2")
+        self.assertEqual(exports["DEPLOY_VLLM_PORTS"], "9101 9102")
         self.assertEqual(
-            exports["VAST_VLLM_ENDPOINTS"],
+            exports["DEPLOY_VLLM_ENDPOINTS"],
             "http://127.0.0.1:9101/v1 http://127.0.0.1:9102/v1",
         )
-        self.assertEqual(exports["VAST_VLLM_ARGS"], "--trust-remote-code --dtype auto")
-        self.assertTrue(exports["VAST_VLLM_LOG_DIR"].endswith("node-logs/vllm"))
-        self.assertEqual(exports["VAST_MICROMAMBA_ENV"], "test-env")
-        self.assertEqual(exports["VAST_PIP_PACKAGES"], "vllm==1.0.0")
+        self.assertEqual(exports["DEPLOY_VLLM_ARGS"], "--trust-remote-code --dtype auto")
+        self.assertTrue(exports["DEPLOY_VLLM_LOG_DIR"].endswith("node-logs/vllm"))
+        self.assertEqual(exports["DEPLOY_MICROMAMBA_ENV"], "test-env")
+        self.assertEqual(exports["DEPLOY_PIP_PACKAGES"], "vllm==1.0.0")
 
 
 class ModelCoercionTests(unittest.TestCase):

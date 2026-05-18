@@ -4,17 +4,17 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${script_dir}/load-config-env.sh"
 
-if ! [[ "$VAST_MODEL_COUNT" =~ ^[1-9][0-9]*$ ]]; then
+if ! [[ "$DEPLOY_MODEL_COUNT" =~ ^[1-9][0-9]*$ ]]; then
   echo "retrieval.local_model_count must be an integer >= 1" >&2
   exit 1
 fi
 
-read -r -a ports <<<"$VAST_VLLM_PORTS"
-read -r -a vllm_args <<<"$VAST_VLLM_ARGS"
+read -r -a ports <<<"$DEPLOY_VLLM_PORTS"
+read -r -a vllm_args <<<"$DEPLOY_VLLM_ARGS"
 if [[ -n "${VLLM_API_KEY:-}" ]]; then
   vllm_args+=(--api-key "$VLLM_API_KEY")
 fi
-if [[ "${#ports[@]}" -ne "$VAST_MODEL_COUNT" ]]; then
+if [[ "${#ports[@]}" -ne "$DEPLOY_MODEL_COUNT" ]]; then
   echo "retrieval.local_base_urls must provide one port per local model" >&2
   exit 1
 fi
@@ -29,20 +29,20 @@ if ! command -v vllm >/dev/null 2>&1; then
     echo "vllm is not on PATH and micromamba is unavailable; run setup-node.sh first" >&2
     exit 1
   fi
-  runner=("$micromamba_bin" run -n "$VAST_MICROMAMBA_ENV")
+  runner=("$micromamba_bin" run -n "$DEPLOY_MICROMAMBA_ENV")
 fi
 
-mkdir -p "$VAST_VLLM_LOG_DIR"
+mkdir -p "$DEPLOY_VLLM_LOG_DIR"
 
-for ((gpu = 0; gpu < VAST_MODEL_COUNT; gpu++)); do
+for ((gpu = 0; gpu < DEPLOY_MODEL_COUNT; gpu++)); do
   port="${ports[$gpu]}"
-  echo "starting ${VAST_MODEL_ID} on GPU ${gpu}, port ${port}"
+  echo "starting ${DEPLOY_MODEL_ID} on GPU ${gpu}, port ${port}"
   CUDA_VISIBLE_DEVICES="$gpu" \
-    "${runner[@]}" vllm serve "$VAST_MODEL_ID" \
-      --host "$VAST_VLLM_HOST" \
+    "${runner[@]}" vllm serve "$DEPLOY_MODEL_ID" \
+      --host "$DEPLOY_VLLM_HOST" \
       --port "$port" \
       "${vllm_args[@]}" \
-      >"${VAST_VLLM_LOG_DIR}/vllm-${gpu}.log" 2>&1 &
+      >"${DEPLOY_VLLM_LOG_DIR}/vllm-${gpu}.log" 2>&1 &
 done
 
 wait
