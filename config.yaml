@@ -48,5 +48,6 @@ deploy:
     - curl
     - git
     - build-essential
+    - tmux
   pip_packages:
     - vllm

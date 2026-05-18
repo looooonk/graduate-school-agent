@@ -262,6 +262,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(exports["DEPLOY_VLLM_ARGS"], "--trust-remote-code --dtype auto")
         self.assertTrue(exports["DEPLOY_VLLM_LOG_DIR"].endswith("node-logs/vllm"))
         self.assertEqual(exports["DEPLOY_MICROMAMBA_ENV"], "test-env")
+        self.assertEqual(exports["DEPLOY_SYSTEM_PACKAGES"], "curl git build-essential tmux")
         self.assertEqual(exports["DEPLOY_PIP_PACKAGES"], "vllm==1.0.0")
 
 

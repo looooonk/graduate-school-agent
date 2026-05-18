@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-DEFAULT_SYSTEM_PACKAGES = ("curl", "git", "build-essential")
+DEFAULT_SYSTEM_PACKAGES = ("curl", "git", "build-essential", "tmux")
 DEFAULT_PIP_PACKAGES = ("vllm",)
 
 
