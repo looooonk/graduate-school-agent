@@ -37,7 +37,12 @@ class ConfigTests(unittest.TestCase):
                         "models:",
                         "  haiku: yaml-haiku",
                         "  sonnet: yaml-sonnet",
+                        "  local_retrieval: yaml-qwen",
                         "retrieval:",
+                        "  backend: local_qwen_vllm",
+                        "  local_base_urls:",
+                        "    - http://127.0.0.1:9001/v1",
+                        "  local_timeout: 120",
                         "  max_turns: 9",
                         "  max_search_results: 7",
                         "output:",
@@ -66,6 +71,11 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.brave_api_key, "brave-test-key")
         self.assertEqual(config.haiku_model, "yaml-haiku")
         self.assertEqual(config.sonnet_model, "yaml-sonnet")
+        self.assertEqual(config.local_retrieval_model, "yaml-qwen")
+        self.assertEqual(config.retrieval_backend, "local_qwen_vllm")
+        self.assertEqual(config.local_retrieval_base_urls, ("http://127.0.0.1:9001/v1",))
+        self.assertEqual(config.local_retrieval_timeout, 120)
+        self.assertEqual(config.retrieval_model, "yaml-qwen")
         self.assertEqual(config.max_retrieval_turns, 3)
         self.assertEqual(config.max_search_results, 7)
         self.assertEqual(config.output_dir, "override-output")
@@ -77,6 +87,11 @@ class ConfigTests(unittest.TestCase):
             brave_api_key="",
             haiku_model="haiku",
             sonnet_model="sonnet",
+            local_retrieval_model="qwen",
+            retrieval_backend="bad",
+            local_retrieval_base_urls=(),
+            local_retrieval_api_key="",
+            local_retrieval_timeout=0,
             max_retrieval_turns=0,
             max_search_results=True,
             max_page_chars=10,
@@ -95,7 +110,24 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("BRAVE_API_KEY is required (set in environment or .env)", errors)
         self.assertIn("retrieval.max_turns must be an integer >= 1", errors)
         self.assertIn("retrieval.max_search_results must be an integer >= 1", errors)
+        self.assertIn("retrieval.backend must be one of: anthropic_haiku, local_qwen_vllm", errors)
+        self.assertIn("retrieval.local_timeout must be an integer >= 1", errors)
         self.assertIn("http.retries must be an integer >= 0", errors)
+
+    def test_default_retrieval_backend_is_local_qwen(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "ANTHROPIC_API_KEY": "anthropic-test-key",
+                "BRAVE_API_KEY": "brave-test-key",
+            },
+            clear=True,
+        ), patch("grad_agent.config.dotenv.load_dotenv", return_value=True):
+            config = Config.load(yaml_path=Path("/does/not/exist.yaml"))
+
+        self.assertEqual(config.retrieval_backend, "local_qwen_vllm")
+        self.assertEqual(config.retrieval_model, "Qwen/Qwen3.6-35B-A3B-FP8")
+        self.assertEqual(len(config.local_retrieval_base_urls), 4)
 
 
 class ModelCoercionTests(unittest.TestCase):

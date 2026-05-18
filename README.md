@@ -1,12 +1,12 @@
 # Graduate School Agent
 
-An Anthropic SDK based research agent that gathers graduate program information, evaluates source quality, scores applicant fit against a CV, and writes Markdown reports.
+An LLM-based research agent that gathers graduate program information, evaluates source quality, scores applicant fit against a CV, and writes Markdown reports.
 
 The agent is intended for application planning: it searches official program pages, faculty pages, and informal applicant reports, then produces a structured profile for each school plus a ranked summary.
 
 ## Features
 
-- Agentic retrieval loop using Claude Haiku with `web_search` and `fetch_page` tools.
+- Agentic retrieval loop using Claude Haiku or local Qwen through vLLM, with `web_search` and `fetch_page` tools.
 - Quality judging with Claude Sonnet to flag missing, stale, contradictory, or weakly sourced fields.
 - CV-aware fit assessment with Claude Sonnet.
 - Optional gap-fill pass when the judge rates a profile as insufficient.
@@ -19,6 +19,7 @@ The agent is intended for application planning: it searches official program pag
 - Python 3.11 or newer
 - Anthropic API key
 - Brave Search API key
+- Four local OpenAI-compatible vLLM endpoints for default retrieval, or `--retrieval-backend anthropic_haiku`
 
 Install the package in editable mode:
 
@@ -47,7 +48,24 @@ $EDITOR input/cv.md
 
 Optional applicant context can be placed at `input/context.md`. It is injected into retrieval, judge, fit, and gap-fill prompts, and is useful for target subfields, advisor preferences, funding needs, geographic constraints, or scoring guidance.
 
-Run the agent:
+Start the local retrieval servers if you are using the default config:
+
+```bash
+cd deploy/vast
+cp env.example .env
+set -a
+. ./.env
+set +a
+./start-vllm.sh
+```
+
+In another shell, check the four endpoints:
+
+```bash
+deploy/vast/healthcheck.sh
+```
+
+Run the agent with local Qwen retrieval and Sonnet judge/fit:
 
 ```bash
 grad-agent --schools input/schools.json --cv input/cv.md
@@ -57,6 +75,12 @@ Run a single school without a JSON file:
 
 ```bash
 grad-agent --school "MIT" --program "PhD Electrical Engineering and Computer Science" --cv input/cv.md
+```
+
+To use Anthropic Haiku for retrieval instead of local Qwen:
+
+```bash
+grad-agent --schools input/schools.json --cv input/cv.md --retrieval-backend anthropic_haiku
 ```
 
 ## Input Format
@@ -91,7 +115,8 @@ Useful options:
 - `--output DIR`: override the configured Markdown output directory.
 - `--context PATH`: use an applicant context file.
 - `--max-turns N`: override retrieval turn budget.
-- `--max-parallel N`: parsed into config, but current execution is sequential.
+- `--max-parallel N`: override max concurrent school pipelines.
+- `--retrieval-backend {anthropic_haiku,local_qwen_vllm}`: choose Claude Haiku retrieval or local vLLM Qwen retrieval.
 - `--no-gap-fill`: disable targeted gap-fill on insufficient profiles.
 - `--verbose`: bypass the Rich TUI and print debug logs to stderr.
 
@@ -120,18 +145,20 @@ Each profile includes:
 Each school runs through this pipeline:
 
 ```text
-retrieval (Haiku) -> judge (Sonnet) + fit (Sonnet) -> Markdown output
-                    -> optional gap-fill (Haiku) -> re-judge + re-fit
+retrieval (local Qwen by default) -> judge (Sonnet) + fit (Sonnet) -> Markdown output
+                                  -> optional gap-fill (same retrieval backend) -> re-judge + re-fit
 ```
 
 Stage details:
 
-- `retrieval`: Claude Haiku searches the web through Brave and fetches pages with HTTPX, then emits a `SchoolProfile` JSON object.
+- `retrieval`: the configured retrieval backend searches the web through Brave and fetches pages with HTTPX, then emits a `SchoolProfile` JSON object.
+- `local_qwen_vllm` retrieval calls the OpenAI-compatible vLLM chat completions API and uses a JSON command loop for `web_search` and `fetch_page`.
+- `anthropic_haiku` retrieval uses Anthropic native tool calls with the same tool handlers.
 - `judge`: Claude Sonnet evaluates profile coverage, source quality, consistency, program match, cycle freshness, and actionability.
 - `fit`: Claude Sonnet compares the profile against the applicant CV and optional context.
 - `gap-fill`: if enabled, runs targeted retrieval using the judge's suggested queries when the initial profile is insufficient.
 
-Judge and fit run concurrently for a school. Schools themselves currently run sequentially in `run_all_schools`, despite the `max_schools_parallel` configuration field.
+Judge and fit run concurrently for a school. Schools run with bounded concurrency from `max_schools_parallel`.
 
 ## Configuration
 
@@ -141,11 +168,19 @@ Default `config.yaml`:
 models:
   haiku: claude-haiku-4-5-20251001
   sonnet: claude-sonnet-4-6
+  local_retrieval: Qwen/Qwen3.6-35B-A3B-FP8
 
 retrieval:
+  backend: local_qwen_vllm
   max_turns: 25
   max_search_results: 5
   max_page_chars: 30000
+  local_base_urls:
+    - http://127.0.0.1:8001/v1
+    - http://127.0.0.1:8002/v1
+    - http://127.0.0.1:8003/v1
+    - http://127.0.0.1:8004/v1
+  local_timeout: 600
 
 judge:
   retry_gap_fill: true
@@ -168,9 +203,35 @@ logs:
 Notes:
 
 - `.env` is loaded automatically from the current working tree.
-- Missing API keys fail validation before the pipeline starts.
-- `http.retries` is validated but not currently applied by the fetch/search tool handlers.
+- `ANTHROPIC_API_KEY` is still required because judge and fit use Sonnet.
+- `BRAVE_API_KEY` is required for retrieval web search in both backends.
+- `retrieval.backend` accepts `local_qwen_vllm` or `anthropic_haiku`.
+- Local vLLM retrieval uses the OpenAI-compatible `/chat/completions` API and round-robins across `retrieval.local_base_urls`.
+- Vast.ai launch scripts for four one-GPU vLLM instances live in `deploy/vast/`.
+- Set `VLLM_API_KEY` only if the vLLM servers require bearer-token authentication.
+- `http.retries` is applied to local vLLM endpoint failover, but not currently applied by the fetch/search tool handlers.
 - Set `logs.dir: ""` to disable trajectory logging.
+
+## Local vLLM Deployment
+
+The default retrieval model is `Qwen/Qwen3.6-35B-A3B-FP8`. The expected local topology is four independent vLLM servers, one per GPU:
+
+```text
+GPU 0 -> http://127.0.0.1:8001/v1
+GPU 1 -> http://127.0.0.1:8002/v1
+GPU 2 -> http://127.0.0.1:8003/v1
+GPU 3 -> http://127.0.0.1:8004/v1
+```
+
+The app does not launch or supervise vLLM processes. It round-robins retrieval calls across `retrieval.local_base_urls` and fails over according to `http.retries`.
+
+On a Vast.ai node, install vLLM in the runtime environment, then use:
+
+```bash
+deploy/vast/start-vllm.sh
+```
+
+The script accepts environment overrides such as `MODEL_ID`, `HOST`, `START_PORT`, `VLLM_ARGS`, and `LOG_DIR`. See `deploy/vast/README.md` for the deployment-specific flow.
 
 ## Development
 
@@ -199,10 +260,12 @@ grad_agent/
   cli.py                 argparse CLI entry point
   config.py              YAML, .env, and environment config loading
   events.py              pipeline events consumed by the TUI
+  llm/
+    vllm.py              OpenAI-compatible local vLLM client
   models.py              Pydantic schemas
   tui.py                 Rich live terminal UI
   pipeline/
-    retrieval.py         Haiku retrieval agent loop
+    retrieval.py         Anthropic or local-vLLM retrieval agent loop
     judge.py             Sonnet quality judge
     fit.py               Sonnet fit assessor
     runner.py            per-school orchestration

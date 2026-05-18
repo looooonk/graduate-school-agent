@@ -94,6 +94,12 @@ def _parse_args() -> argparse.Namespace:
         help="Override max parallel schools",
     )
     parser.add_argument(
+        "--retrieval-backend",
+        choices=("anthropic_haiku", "local_qwen_vllm"),
+        default=None,
+        help="Override retrieval backend",
+    )
+    parser.add_argument(
         "--no-gap-fill",
         action="store_true",
         help="Disable automatic gap-fill when judge rates profile as insufficient",
@@ -178,6 +184,8 @@ def main() -> None:
         overrides["max_retrieval_turns"] = args.max_turns
     if args.max_parallel is not None:
         overrides["max_schools_parallel"] = args.max_parallel
+    if args.retrieval_backend is not None:
+        overrides["retrieval_backend"] = args.retrieval_backend
     if args.no_gap_fill:
         overrides["retry_gap_fill"] = False
     if args.output is not None:
@@ -191,8 +199,8 @@ def main() -> None:
         sys.exit(1)
 
     log.info(
-        "Configuration: haiku=%s, sonnet=%s, max_turns=%d, parallel=%d",
-        config.haiku_model, config.sonnet_model,
+        "Configuration: retrieval=%s/%s, sonnet=%s, max_turns=%d, parallel=%d",
+        config.retrieval_backend, config.retrieval_model, config.sonnet_model,
         config.max_retrieval_turns, config.max_schools_parallel,
     )
 

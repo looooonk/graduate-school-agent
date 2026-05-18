@@ -33,6 +33,11 @@ def _test_config(**overrides: object) -> Config:
         "brave_api_key": "brave-test-key",
         "haiku_model": "haiku-test",
         "sonnet_model": "sonnet-test",
+        "local_retrieval_model": "Qwen/Qwen3.6-35B-A3B-FP8",
+        "retrieval_backend": "anthropic_haiku",
+        "local_retrieval_base_urls": ("http://127.0.0.1:8001/v1",),
+        "local_retrieval_api_key": "",
+        "local_retrieval_timeout": 30,
         "max_retrieval_turns": 2,
         "max_search_results": 3,
         "max_page_chars": 20,
@@ -81,11 +86,32 @@ class FakeClient:
         self.messages = FakeMessages(responses)
 
 
+class FakeLocalClient:
+    def __init__(self, responses: list[SimpleNamespace]) -> None:
+        self.responses = responses
+        self.calls: list[dict[str, object]] = []
+
+    async def create(self, _http: object, **kwargs: object) -> SimpleNamespace:
+        self.calls.append(kwargs)
+        if not self.responses:
+            raise AssertionError("No fake local response queued")
+        return self.responses.pop(0)
+
+
 def fake_response(text: str, *, stop_reason: str = "end_turn") -> SimpleNamespace:
     return SimpleNamespace(
         stop_reason=stop_reason,
         content=[FakeTextBlock(text)],
         usage=SimpleNamespace(input_tokens=12, output_tokens=6),
+    )
+
+
+def fake_local_response(text: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        text=text,
+        content=[FakeTextBlock(text)],
+        stop_reason="stop",
+        usage=SimpleNamespace(input_tokens=7, output_tokens=3),
     )
 
 
@@ -315,6 +341,58 @@ class PipelineStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats.api_calls, 2)
         self.assertEqual(stats.tool_calls, 1)
         self.assertEqual(len(events), 3)
+
+    async def test_run_retrieval_uses_local_json_tool_protocol(self) -> None:
+        local_client = FakeLocalClient(
+            [
+                fake_local_response(
+                    json.dumps(
+                        {
+                            "tool": "web_search",
+                            "args": {"query": "Example MS CS deadline"},
+                        }
+                    )
+                ),
+                fake_local_response(
+                    json.dumps(
+                        {
+                            "school_name": "Wrong",
+                            "program_name": "Wrong",
+                            "deadline": "December 1",
+                            "sources": ["https://example.edu"],
+                        }
+                    )
+                ),
+            ]
+        )
+
+        async def fake_dispatch(
+            name: str,
+            args: dict[str, object],
+            _config: Config,
+            _http: object,
+            _school: str,
+        ) -> str:
+            self.assertEqual(name, "web_search")
+            self.assertEqual(args, {"query": "Example MS CS deadline"})
+            return "1. Example result"
+
+        with patch.object(retrieval, "dispatch_tool", fake_dispatch):
+            profile, stats = await retrieval.run_retrieval(
+                "Example University",
+                "MS CS",
+                _test_config(retrieval_backend="local_qwen_vllm"),
+                FakeClient([]),
+                SimpleNamespace(),
+                local_client=local_client,
+            )
+
+        self.assertEqual(profile.school_name, "Example University")
+        self.assertEqual(profile.deadline, "December 1")
+        self.assertEqual(stats.model, "Qwen/Qwen3.6-35B-A3B-FP8")
+        self.assertEqual(stats.api_calls, 2)
+        self.assertEqual(stats.tool_calls, 1)
+        self.assertEqual(local_client.calls[0]["model"], "Qwen/Qwen3.6-35B-A3B-FP8")
 
 
 class CliTests(unittest.TestCase):

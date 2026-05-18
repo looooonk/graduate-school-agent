@@ -135,6 +135,23 @@ Example of a correctly-formatted response:
 """
 
 
+LOCAL_RETRIEVAL_PROTOCOL = """\
+## Local tool protocol
+
+When you need a tool, output exactly one JSON object with this shape:
+
+{"tool": "web_search", "args": {"query": "..."}}
+
+or:
+
+{"tool": "fetch_page", "args": {"url": "https://..."}}
+
+Use one tool call per turn. After receiving the tool result, either request the \
+next tool using the same JSON command shape or output the final SchoolProfile \
+JSON. Do not wrap tool commands in prose or Markdown fences.
+"""
+
+
 def retrieval_user_prompt(
     school_name: str,
     program_name: str,

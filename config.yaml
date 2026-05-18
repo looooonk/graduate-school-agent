@@ -1,14 +1,23 @@
 # Graduate School Agent — Configuration
-# API keys are loaded from environment variables (see .env.example), not this file.
+# API keys are loaded from environment variables, not this file.
 
 models:
   haiku: claude-haiku-4-5-20251001
   sonnet: claude-sonnet-4-6
+  local_retrieval: Qwen/Qwen3.6-35B-A3B-FP8
 
 retrieval:
+  # Available backends: anthropic_haiku, local_qwen_vllm
+  backend: local_qwen_vllm
   max_turns: 25
   max_search_results: 5
   max_page_chars: 30000
+  local_base_urls:
+    - http://127.0.0.1:8001/v1
+    - http://127.0.0.1:8002/v1
+    - http://127.0.0.1:8003/v1
+    - http://127.0.0.1:8004/v1
+  local_timeout: 600
 
 judge:
   retry_gap_fill: true
