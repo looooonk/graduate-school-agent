@@ -52,8 +52,6 @@ deploy:
     - "32768"
     - --max-num-seqs
     - "256"
-    - --kv-cache-dtype
-    - fp8_e5m2
   log_dir: logs/vllm
   micromamba_env: graduate-school-agent
   python_version: "3.11"
