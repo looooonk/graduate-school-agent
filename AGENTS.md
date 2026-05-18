@@ -162,12 +162,7 @@ For fewer or more GPUs, set `retrieval.local_model_count` to the number of model
 Deployment helpers live in `deploy/`:
 
 ```bash
-cd deploy
-cp env.example .env
-set -a
-. ./.env
-set +a
-./start-vllm.sh
+deploy/start-vllm.sh
 ```
 
 Health check:

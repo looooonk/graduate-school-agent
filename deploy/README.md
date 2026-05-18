@@ -60,7 +60,3 @@ micromamba run -n graduate-school-agent grad-agent --schools input/schools.json 
 Set `ANTHROPIC_API_KEY` and `BRAVE_API_KEY` in the shell or root `.env` before
 running the agent. Set `VLLM_API_KEY` only if you start vLLM with API-key
 enforcement.
-
-`env.example` is only a convenience shim for interactive shells. It sources the
-same `config.yaml` loader used by the scripts and does not duplicate deployment
-values.
