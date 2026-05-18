@@ -53,7 +53,7 @@ deploy/healthcheck.sh
 Run the agent against local retrieval:
 
 ```bash
-micromamba run -n graduate-school-agent grad-agent --schools input/schools.json --cv input/cv.md \
+~/.local/bin/micromamba run -n graduate-school-agent grad-agent --schools input/schools.json --cv input/cv.md \
   --retrieval-backend local_qwen_vllm
 ```
 
