@@ -39,6 +39,7 @@ class Config:
     sonnet_model: str
     local_retrieval_model: str
     retrieval_backend: str
+    local_retrieval_model_count: int
     local_retrieval_base_urls: tuple[str, ...]
     local_retrieval_api_key: str
     local_retrieval_timeout: int
@@ -83,6 +84,16 @@ class Config:
         path = Path(yaml_path) if yaml_path else _DEFAULT_YAML_PATH
         raw = _load_yaml(path)
         ov = overrides or {}
+        local_retrieval_base_urls = _as_tuple(
+            ov.get(
+                "local_retrieval_base_urls",
+                _get(raw, "retrieval.local_base_urls", _DEFAULT_LOCAL_RETRIEVAL_BASE_URLS),
+            )
+        )
+        local_retrieval_model_count = ov.get(
+            "local_retrieval_model_count",
+            _get(raw, "retrieval.local_model_count", len(local_retrieval_base_urls)),
+        )
 
         return cls(
             anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
@@ -99,12 +110,8 @@ class Config:
                 "retrieval_backend",
                 _get(raw, "retrieval.backend", "local_qwen_vllm"),
             ),
-            local_retrieval_base_urls=_as_tuple(
-                ov.get(
-                    "local_retrieval_base_urls",
-                    _get(raw, "retrieval.local_base_urls", _DEFAULT_LOCAL_RETRIEVAL_BASE_URLS),
-                )
-            ),
+            local_retrieval_model_count=local_retrieval_model_count,
+            local_retrieval_base_urls=local_retrieval_base_urls,
             local_retrieval_api_key=ov.get(
                 "local_retrieval_api_key",
                 os.environ.get("VLLM_API_KEY", _get(raw, "retrieval.local_api_key", "")),
@@ -140,8 +147,19 @@ class Config:
         if self.retrieval_backend not in _RETRIEVAL_BACKENDS:
             allowed = ", ".join(sorted(_RETRIEVAL_BACKENDS))
             errors.append(f"retrieval.backend must be one of: {allowed}")
-        if self.retrieval_backend == "local_qwen_vllm" and not self.local_retrieval_base_urls:
-            errors.append("retrieval.local_base_urls must include at least one endpoint")
+        errors.extend(
+            _validate_positive_int("retrieval.local_model_count", self.local_retrieval_model_count)
+        )
+        if self.retrieval_backend == "local_qwen_vllm":
+            if not self.local_retrieval_base_urls:
+                errors.append("retrieval.local_base_urls must include at least one endpoint")
+            elif _is_positive_int(self.local_retrieval_model_count) and (
+                len(self.local_retrieval_base_urls) != self.local_retrieval_model_count
+            ):
+                errors.append(
+                    "retrieval.local_model_count must match the number of "
+                    "retrieval.local_base_urls endpoints"
+                )
         errors.extend(_validate_positive_int("retrieval.max_turns", self.max_retrieval_turns))
         errors.extend(
             _validate_positive_int("retrieval.max_search_results", self.max_search_results)
@@ -179,6 +197,11 @@ class Config:
         """Whether retrieval should call local OpenAI-compatible vLLM endpoints."""
         return self.retrieval_backend == "local_qwen_vllm"
 
+    @property
+    def local_retrieval_endpoints(self) -> tuple[str, ...]:
+        """Return the configured local retrieval endpoints."""
+        return self.local_retrieval_base_urls
+
 
 def _load_yaml(path: Path) -> dict[str, Any]:
     """Load a YAML file, returning an empty dict if the file doesn't exist."""
@@ -211,6 +234,10 @@ def _as_tuple(value: Any) -> tuple[str, ...]:
 
 
 def _validate_positive_int(name: str, value: Any) -> list[str]:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+    if not _is_positive_int(value):
         return [f"{name} must be an integer >= 1"]
     return []
+
+
+def _is_positive_int(value: Any) -> bool:
+    return not isinstance(value, bool) and isinstance(value, int) and value >= 1

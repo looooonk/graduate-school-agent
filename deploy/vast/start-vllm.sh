@@ -4,12 +4,18 @@ set -euo pipefail
 MODEL_ID="${MODEL_ID:-Qwen/Qwen3.6-35B-A3B-FP8}"
 HOST="${HOST:-0.0.0.0}"
 START_PORT="${START_PORT:-8001}"
+MODEL_COUNT="${MODEL_COUNT:-1}"
 VLLM_ARGS="${VLLM_ARGS:---trust-remote-code}"
 LOG_DIR="${LOG_DIR:-logs/vllm}"
 
+if ! [[ "$MODEL_COUNT" =~ ^[1-9][0-9]*$ ]]; then
+  echo "MODEL_COUNT must be an integer >= 1" >&2
+  exit 1
+fi
+
 mkdir -p "$LOG_DIR"
 
-for gpu in 0 1 2 3; do
+for ((gpu = 0; gpu < MODEL_COUNT; gpu++)); do
   port=$((START_PORT + gpu))
   echo "starting ${MODEL_ID} on GPU ${gpu}, port ${port}"
   CUDA_VISIBLE_DEVICES="$gpu" \
@@ -21,4 +27,3 @@ for gpu in 0 1 2 3; do
 done
 
 wait
-

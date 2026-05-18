@@ -199,9 +199,9 @@ def main() -> None:
         sys.exit(1)
 
     log.info(
-        "Configuration: retrieval=%s/%s, sonnet=%s, max_turns=%d, parallel=%d",
-        config.retrieval_backend, config.retrieval_model, config.sonnet_model,
-        config.max_retrieval_turns, config.max_schools_parallel,
+        "Configuration: retrieval=%s/%s, local_models=%d, sonnet=%s, max_turns=%d, parallel=%d",
+        config.retrieval_backend, config.retrieval_model, config.local_retrieval_model_count,
+        config.sonnet_model, config.max_retrieval_turns, config.max_schools_parallel,
     )
 
     # Start TUI when running interactively; fall back to plain logging otherwise.

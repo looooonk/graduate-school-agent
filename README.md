@@ -19,7 +19,7 @@ The agent is intended for application planning: it searches official program pag
 - Python 3.11 or newer
 - Anthropic API key
 - Brave Search API key
-- Four local OpenAI-compatible vLLM endpoints for default retrieval, or `--retrieval-backend anthropic_haiku`
+- One or more local OpenAI-compatible vLLM endpoints for default retrieval, or `--retrieval-backend anthropic_haiku`
 
 Install the package in editable mode:
 
@@ -59,7 +59,7 @@ set +a
 ./start-vllm.sh
 ```
 
-In another shell, check the four endpoints:
+In another shell, check the configured endpoints:
 
 ```bash
 deploy/vast/healthcheck.sh
@@ -175,6 +175,7 @@ retrieval:
   max_turns: 25
   max_search_results: 5
   max_page_chars: 30000
+  local_model_count: 4
   local_base_urls:
     - http://127.0.0.1:8001/v1
     - http://127.0.0.1:8002/v1
@@ -206,15 +207,16 @@ Notes:
 - `ANTHROPIC_API_KEY` is still required because judge and fit use Sonnet.
 - `BRAVE_API_KEY` is required for retrieval web search in both backends.
 - `retrieval.backend` accepts `local_qwen_vllm` or `anthropic_haiku`.
+- `retrieval.local_model_count` is the number of local model copies the app expects. It must equal the number of `retrieval.local_base_urls` endpoints.
 - Local vLLM retrieval uses the OpenAI-compatible `/chat/completions` API and round-robins across `retrieval.local_base_urls`.
-- Vast.ai launch scripts for four one-GPU vLLM instances live in `deploy/vast/`.
+- Vast.ai launch scripts start `MODEL_COUNT` one-GPU vLLM instances in `deploy/vast/`.
 - Set `VLLM_API_KEY` only if the vLLM servers require bearer-token authentication.
 - `http.retries` is applied to local vLLM endpoint failover, but not currently applied by the fetch/search tool handlers.
 - Set `logs.dir: ""` to disable trajectory logging.
 
 ## Local vLLM Deployment
 
-The default retrieval model is `Qwen/Qwen3.6-35B-A3B-FP8`. The expected local topology is four independent vLLM servers, one per GPU:
+The default retrieval model is `Qwen/Qwen3.6-35B-A3B-FP8`. The local topology is `retrieval.local_model_count` independent vLLM servers, one per GPU. The default topology uses four local model copies:
 
 ```text
 GPU 0 -> http://127.0.0.1:8001/v1
@@ -223,7 +225,21 @@ GPU 2 -> http://127.0.0.1:8003/v1
 GPU 3 -> http://127.0.0.1:8004/v1
 ```
 
-The app does not launch or supervise vLLM processes. It round-robins retrieval calls across `retrieval.local_base_urls` and fails over according to `http.retries`.
+For fewer GPUs, set `retrieval.local_model_count` to the available GPU count, provide the same number of endpoints, and start the deployment scripts with matching `MODEL_COUNT`. For two GPUs:
+
+```yaml
+retrieval:
+  local_model_count: 2
+  local_base_urls:
+    - http://127.0.0.1:8001/v1
+    - http://127.0.0.1:8002/v1
+```
+
+```bash
+MODEL_COUNT=2 deploy/vast/start-vllm.sh
+```
+
+The app does not launch or supervise vLLM processes. It validates that `retrieval.local_model_count` matches `retrieval.local_base_urls`, then round-robins retrieval calls across those endpoints and fails over according to `http.retries`.
 
 On a Vast.ai node, install vLLM in the runtime environment, then use:
 
@@ -231,7 +247,7 @@ On a Vast.ai node, install vLLM in the runtime environment, then use:
 deploy/vast/start-vllm.sh
 ```
 
-The script accepts environment overrides such as `MODEL_ID`, `HOST`, `START_PORT`, `VLLM_ARGS`, and `LOG_DIR`. See `deploy/vast/README.md` for the deployment-specific flow.
+The script accepts environment overrides such as `MODEL_ID`, `MODEL_COUNT`, `HOST`, `START_PORT`, `VLLM_ARGS`, and `LOG_DIR`. See `deploy/vast/README.md` for the deployment-specific flow.
 
 ## Development
 

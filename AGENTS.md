@@ -19,7 +19,7 @@ The installed CLI entry point is:
 grad-agent
 ```
 
-Primary Python runtime dependencies are `anthropic`, `pydantic`, `httpx`, `pyyaml`, `python-dotenv`, and `rich`. Default retrieval also expects four local OpenAI-compatible vLLM servers running `Qwen/Qwen3.6-35B-A3B-FP8`.
+Primary Python runtime dependencies are `anthropic`, `pydantic`, `httpx`, `pyyaml`, `python-dotenv`, and `rich`. Default retrieval also expects one or more local OpenAI-compatible vLLM servers running `Qwen/Qwen3.6-35B-A3B-FP8`.
 
 ## Development Environment
 
@@ -43,7 +43,7 @@ retrieval (local Qwen vLLM by default) -> judge (Sonnet) + fit (Sonnet) -> Markd
 
 Important behavior:
 
-- Default `retrieval` uses local `Qwen/Qwen3.6-35B-A3B-FP8` through four OpenAI-compatible vLLM endpoints.
+- Default `retrieval` uses local `Qwen/Qwen3.6-35B-A3B-FP8` through the configured OpenAI-compatible vLLM endpoints.
 - The alternate retrieval backend is Claude Haiku via Anthropic native tool calls. Select it with `retrieval.backend: anthropic_haiku` or `--retrieval-backend anthropic_haiku`.
 - Local Qwen retrieval uses a strict JSON command loop for two tools: `web_search` and `fetch_page`.
 - `web_search` calls Brave Search.
@@ -118,6 +118,7 @@ retrieval:
   max_turns: 25
   max_search_results: 5
   max_page_chars: 30000
+  local_model_count: 4
   local_base_urls:
     - http://127.0.0.1:8001/v1
     - http://127.0.0.1:8002/v1
@@ -147,7 +148,7 @@ Set `logs.dir: ""` to disable trajectory logging.
 
 ## Local vLLM Usage
 
-Default runtime expects four independent vLLM servers, one per GPU:
+Default runtime expects `retrieval.local_model_count` independent vLLM servers, one per GPU. The default config uses four local model copies:
 
 ```text
 http://127.0.0.1:8001/v1
@@ -155,6 +156,8 @@ http://127.0.0.1:8002/v1
 http://127.0.0.1:8003/v1
 http://127.0.0.1:8004/v1
 ```
+
+For fewer or more GPUs, set `retrieval.local_model_count` to the number of model copies and provide the same number of endpoints in `retrieval.local_base_urls`. The app validates that these counts match and round-robins local retrieval calls across the endpoints.
 
 Deployment helpers live in `deploy/vast/`:
 
@@ -176,7 +179,7 @@ deploy/vast/healthcheck.sh
 Run with the default local retrieval backend:
 
 ```bash
-grad-agent --schools input/schools.json --cv input/cv.md --max-parallel 4
+grad-agent --schools input/schools.json --cv input/cv.md
 ```
 
 Switch retrieval back to Anthropic Haiku when local endpoints are unavailable:

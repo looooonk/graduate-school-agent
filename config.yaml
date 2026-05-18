@@ -1,4 +1,4 @@
-# Graduate School Agent — Configuration
+# Graduate School Agent - Configuration
 # API keys are loaded from environment variables, not this file.
 
 models:
@@ -12,6 +12,7 @@ retrieval:
   max_turns: 25
   max_search_results: 5
   max_page_chars: 30000
+  local_model_count: 4
   local_base_urls:
     - http://127.0.0.1:8001/v1
     - http://127.0.0.1:8002/v1
@@ -34,4 +35,4 @@ output:
   dir: output
 
 logs:
-  dir: logs  # trajectory JSONL files; set to "" to disable
+  dir: logs

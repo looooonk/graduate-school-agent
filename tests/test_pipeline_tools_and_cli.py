@@ -35,6 +35,7 @@ def _test_config(**overrides: object) -> Config:
         "sonnet_model": "sonnet-test",
         "local_retrieval_model": "Qwen/Qwen3.6-35B-A3B-FP8",
         "retrieval_backend": "anthropic_haiku",
+        "local_retrieval_model_count": 1,
         "local_retrieval_base_urls": ("http://127.0.0.1:8001/v1",),
         "local_retrieval_api_key": "",
         "local_retrieval_timeout": 30,

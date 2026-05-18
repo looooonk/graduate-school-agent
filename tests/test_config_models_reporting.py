@@ -40,6 +40,7 @@ class ConfigTests(unittest.TestCase):
                         "  local_retrieval: yaml-qwen",
                         "retrieval:",
                         "  backend: local_qwen_vllm",
+                        "  local_model_count: 1",
                         "  local_base_urls:",
                         "    - http://127.0.0.1:9001/v1",
                         "  local_timeout: 120",
@@ -73,6 +74,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.sonnet_model, "yaml-sonnet")
         self.assertEqual(config.local_retrieval_model, "yaml-qwen")
         self.assertEqual(config.retrieval_backend, "local_qwen_vllm")
+        self.assertEqual(config.local_retrieval_model_count, 1)
         self.assertEqual(config.local_retrieval_base_urls, ("http://127.0.0.1:9001/v1",))
         self.assertEqual(config.local_retrieval_timeout, 120)
         self.assertEqual(config.retrieval_model, "yaml-qwen")
@@ -89,6 +91,7 @@ class ConfigTests(unittest.TestCase):
             sonnet_model="sonnet",
             local_retrieval_model="qwen",
             retrieval_backend="bad",
+            local_retrieval_model_count=0,
             local_retrieval_base_urls=(),
             local_retrieval_api_key="",
             local_retrieval_timeout=0,
@@ -111,6 +114,7 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("retrieval.max_turns must be an integer >= 1", errors)
         self.assertIn("retrieval.max_search_results must be an integer >= 1", errors)
         self.assertIn("retrieval.backend must be one of: anthropic_haiku, local_qwen_vllm", errors)
+        self.assertIn("retrieval.local_model_count must be an integer >= 1", errors)
         self.assertIn("retrieval.local_timeout must be an integer >= 1", errors)
         self.assertIn("http.retries must be an integer >= 0", errors)
 
@@ -127,7 +131,77 @@ class ConfigTests(unittest.TestCase):
 
         self.assertEqual(config.retrieval_backend, "local_qwen_vllm")
         self.assertEqual(config.retrieval_model, "Qwen/Qwen3.6-35B-A3B-FP8")
-        self.assertEqual(len(config.local_retrieval_base_urls), 4)
+        self.assertEqual(config.local_retrieval_model_count, 4)
+        self.assertEqual(
+            config.local_retrieval_base_urls,
+            (
+                "http://127.0.0.1:8001/v1",
+                "http://127.0.0.1:8002/v1",
+                "http://127.0.0.1:8003/v1",
+                "http://127.0.0.1:8004/v1",
+            ),
+        )
+
+    def test_local_model_count_must_match_endpoint_count(self) -> None:
+        config = Config(
+            anthropic_api_key="anthropic",
+            brave_api_key="brave",
+            haiku_model="haiku",
+            sonnet_model="sonnet",
+            local_retrieval_model="qwen",
+            retrieval_backend="local_qwen_vllm",
+            local_retrieval_model_count=2,
+            local_retrieval_base_urls=("http://127.0.0.1:8001/v1",),
+            local_retrieval_api_key="",
+            local_retrieval_timeout=60,
+            max_retrieval_turns=2,
+            max_search_results=3,
+            max_page_chars=1000,
+            retry_gap_fill=True,
+            gap_fill_max_turns=1,
+            max_schools_parallel=1,
+            http_timeout=10,
+            http_retries=0,
+            output_dir="output",
+            logs_dir="",
+        )
+
+        self.assertIn(
+            "retrieval.local_model_count must match the number of "
+            "retrieval.local_base_urls endpoints",
+            config.validate(),
+        )
+
+    def test_local_model_count_defaults_to_endpoint_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "retrieval:",
+                        "  local_base_urls:",
+                        "    - http://127.0.0.1:8001/v1",
+                        "    - http://127.0.0.1:8002/v1",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.dict(
+                os.environ,
+                {
+                    "ANTHROPIC_API_KEY": "anthropic-test-key",
+                    "BRAVE_API_KEY": "brave-test-key",
+                },
+                clear=True,
+            ), patch("grad_agent.config.dotenv.load_dotenv", return_value=True):
+                config = Config.load(config_path)
+
+        self.assertEqual(config.local_retrieval_model_count, 2)
+        self.assertEqual(
+            config.local_retrieval_base_urls,
+            ("http://127.0.0.1:8001/v1", "http://127.0.0.1:8002/v1"),
+        )
 
 
 class ModelCoercionTests(unittest.TestCase):

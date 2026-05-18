@@ -49,7 +49,7 @@ class LocalVLLMClient:
     @classmethod
     def from_config(cls, config: Config) -> LocalVLLMClient:
         return cls(
-            config.local_retrieval_base_urls,
+            config.local_retrieval_endpoints,
             api_key=config.local_retrieval_api_key,
             timeout=config.local_retrieval_timeout,
             retries=config.http_retries,
