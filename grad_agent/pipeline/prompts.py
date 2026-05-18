@@ -24,7 +24,7 @@ You must attempt to fill ALL of the following fields:
 
 1. deadline — application deadline date
 2. application_fee — cost to apply
-3. requirements — GRE, GPA minimum, statement of purpose, recommendation \
+3. requirements — GRE policy, GPA minimum, statement of purpose, recommendation \
 letters, and other requirements
 4. essay_prompts — verbatim essay/SOP prompts if available
 5. research_areas — department's active research areas
@@ -57,6 +57,10 @@ different-campus requirements unless the page explicitly applies to all of them.
 them as anecdotal signals unless several reports point in the same direction.
 - If an application deadline, fee, or requirement is from a prior cycle, keep it \
 but say so in the field value or notes instead of presenting it as current.
+- For requirements.gre_policy, use "Required" when GRE scores must be submitted, \
+"Considered" when scores are optional/recommended/accepted and may affect review, \
+and "Not Considered" when scores are waived, not accepted, or explicitly not \
+reviewed.
 - Do not invent missing information. If a field cannot be found, leave it null or \
 empty and explain the missing item in notes.
 - Prefer 4-8 advisor candidates whose research matches the applicant context. \
@@ -78,6 +82,7 @@ Field types (follow these exactly):
 - deadline: string (e.g. "December 1, 2025" or "Rolling" — NOT a dict)
 - application_fee: string (e.g. "$75")
 - requirements.gre_required: boolean true/false (or a short string if conditional)
+- requirements.gre_policy: exactly one of "Required", "Considered", "Not Considered", or null
 - requirements.gpa_minimum: string (e.g. "3.0") or null
 - requirements.statement_of_purpose: boolean true/false
 - requirements.recommendations: integer (e.g. 3)
@@ -99,6 +104,7 @@ Example of a correctly-formatted response:
   "application_fee": "$90",
   "requirements": {
     "gre_required": false,
+    "gre_policy": "Not Considered",
     "gpa_minimum": "3.2",
     "statement_of_purpose": true,
     "recommendations": 3,
@@ -189,11 +195,15 @@ multiple corroborating sources would be expected? Deadlines and requirements \
 should ideally come from official sources.
 3. **Consistency**: Are there contradictions across different parts of the \
 profile?
-4. **Program match**: Flag evidence that appears to come from the wrong degree \
+4. **GRE policy**: requirements.gre_policy must be one of "Required", \
+"Considered", or "Not Considered" and should be backed by official admissions \
+evidence. Flag it if missing, inconsistent with requirements.gre_required, or \
+too vague to populate the summary accurately.
+5. **Program match**: Flag evidence that appears to come from the wrong degree \
 level, department, campus, or admission cycle.
-5. **Confidence**: Flag fields you consider unverified or low-confidence. \
+6. **Confidence**: Flag fields you consider unverified or low-confidence. \
 Deadlines are especially important to flag if they come from unofficial sources.
-6. **Application cycle**: If the applicant context specifies a target admission \
+7. **Application cycle**: If the applicant context specifies a target admission \
 cycle (e.g. Fall 2027), apply the following deadline policy:
    - Deadlines published for the target cycle are ideal — note them as current.
    - Deadlines from the most recent past cycle are **acceptable proxies** — do \
@@ -203,7 +213,7 @@ verify when {target cycle} opens".
 present at all.
    - Apply the same proxy logic to application fees and requirements, which \
 change infrequently.
-7. **Actionability**: Suggested queries should be narrow enough for a short \
+8. **Actionability**: Suggested queries should be narrow enough for a short \
 gap-fill pass. Prefer queries that name the school, program, field, and missing \
 fact.
 

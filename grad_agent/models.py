@@ -10,11 +10,17 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
 # Stage 1 — SchoolProfile
 # ---------------------------------------------------------------------------
+
+class GREPolicy(StrEnum):
+    REQUIRED = "Required"
+    CONSIDERED = "Considered"
+    NOT_CONSIDERED = "Not Considered"
+
 
 class Requirements(BaseModel):
     """Formal application requirements.
@@ -25,10 +31,16 @@ class Requirements(BaseModel):
     """
 
     gre_required: str | bool | None = None
+    gre_policy: GREPolicy | None = None
     gpa_minimum: str | None = None
     statement_of_purpose: str | bool | None = None
     recommendations: str | int | None = None
     other: list[str] = Field(default_factory=list)
+
+    @field_validator("gre_policy", mode="before")
+    @classmethod
+    def coerce_gre_policy(cls, v: Any) -> GREPolicy | None:
+        return _normalize_gre_policy(v)
 
     @field_validator("other", mode="before")
     @classmethod
@@ -37,6 +49,12 @@ class Requirements(BaseModel):
             return [v] if v.strip() else []
         return v or []
 
+    @model_validator(mode="after")
+    def infer_gre_policy(self) -> Requirements:
+        if self.gre_policy is None:
+            self.gre_policy = _infer_gre_policy(self.gre_required, self.other)
+        return self
+
 
 class ApplicantReports(BaseModel):
     """Informal stats aggregated from GradCafe, Reddit, etc."""
@@ -44,6 +62,92 @@ class ApplicantReports(BaseModel):
     typical_gpa: str | None = None
     typical_gre: str | None = None
     acceptance_signals: str | None = None
+
+
+def _normalize_gre_policy(v: Any) -> GREPolicy | None:
+    if v is None:
+        return None
+    if isinstance(v, GREPolicy):
+        return v
+    if isinstance(v, bool):
+        return GREPolicy.REQUIRED if v else GREPolicy.NOT_CONSIDERED
+
+    text = str(v).strip()
+    if not text:
+        return None
+
+    lowered = text.lower().replace("_", " ").replace("-", " ")
+    compact = " ".join(lowered.split())
+    if compact in {"required", "require", "yes"}:
+        return GREPolicy.REQUIRED
+    if compact in {"considered", "optional", "recommended"}:
+        return GREPolicy.CONSIDERED
+    if compact in {"not considered", "not required", "waived", "no"}:
+        return GREPolicy.NOT_CONSIDERED
+
+    return _infer_gre_policy(text, [])
+
+
+def _infer_gre_policy(gre_required: str | bool | None, other: list[str]) -> GREPolicy | None:
+    gre_other = [
+        item
+        for item in other
+        if "gre" in str(item).lower() or "graduate record" in str(item).lower()
+    ]
+    evidence = " ".join(
+        str(part)
+        for part in [gre_required, *gre_other]
+        if part is not None and str(part).strip()
+    ).lower()
+
+    if any(
+        phrase in evidence
+        for phrase in [
+            "not considered",
+            "will not be considered",
+            "will not be reviewed",
+            "not be reviewed",
+            "do not submit",
+            "not accepted",
+            "will not accept",
+        ]
+    ):
+        return GREPolicy.NOT_CONSIDERED
+
+    if any(
+        phrase in evidence
+        for phrase in [
+            "optional",
+            "considered",
+            "recommended",
+            "encouraged",
+            "may submit",
+            "may be submitted",
+            "accepted",
+            "reviewed",
+        ]
+    ):
+        return GREPolicy.CONSIDERED
+
+    if isinstance(gre_required, bool):
+        return GREPolicy.REQUIRED if gre_required else GREPolicy.NOT_CONSIDERED
+
+    if "not required" in evidence or "waived" in evidence:
+        return GREPolicy.NOT_CONSIDERED
+
+    if any(
+        phrase in evidence
+        for phrase in [
+            "required",
+            "must submit",
+            "mandatory",
+            "need to submit",
+            "need submit",
+        ]
+    ):
+        return GREPolicy.REQUIRED
+
+    return None
 
 
 class SchoolProfile(BaseModel):

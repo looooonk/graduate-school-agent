@@ -122,6 +122,7 @@ class ModelCoercionTests(unittest.TestCase):
         )
 
         self.assertEqual(profile.deadline, "fall: December 1")
+        self.assertIsNone(profile.requirements.gre_policy)
         self.assertEqual(profile.requirements.other, ["Portfolio optional"])
         self.assertEqual(profile.essay_prompts, ["Describe your goals."])
         self.assertEqual(profile.research_areas, [])
@@ -151,7 +152,11 @@ class MarkdownRenderingTests(unittest.TestCase):
             program_name="MS CS",
             deadline="December 1",
             application_fee="$75",
-            requirements={"gre_required": False, "statement_of_purpose": True},
+            requirements={
+                "gre_required": False,
+                "gre_policy": "Not Considered",
+                "statement_of_purpose": True,
+            },
             sources=["https://example.edu/mscs"],
         )
         judge = JudgeReport(
@@ -163,7 +168,7 @@ class MarkdownRenderingTests(unittest.TestCase):
         markdown = render_school_markdown(profile, judge=judge)
 
         self.assertIn("**Deadline**: December 1 [unverified]", markdown)
-        self.assertIn("- **GRE required**: No", markdown)
+        self.assertIn("- **GRE**: Not Considered", markdown)
         self.assertIn("- **Statement of Purpose**: Yes", markdown)
         self.assertIn("## Quality Assessment (partial)", markdown)
         self.assertIn("- **deadline**: Prior-cycle deadline.", markdown)
@@ -191,7 +196,38 @@ class MarkdownRenderingTests(unittest.TestCase):
         )
 
         self.assertLess(markdown.index("| 1 | With Fit"), markdown.index("| 2 | No Fit"))
-        self.assertIn("| 2 | No Fit | MS | N/A | N/A | N/A |", markdown)
+        self.assertIn("| 2 | No Fit | MS | N/A | N/A | N/A | N/A |", markdown)
+
+    def test_gre_policy_is_normalized_and_rendered_in_summary(self) -> None:
+        required = SchoolProfile(
+            school_name="Required U",
+            program_name="PhD CS",
+            requirements={"gre_policy": "required"},
+        )
+        considered = SchoolProfile(
+            school_name="Considered U",
+            program_name="MS CS",
+            requirements={"gre_required": "GRE optional but considered"},
+        )
+        not_considered = SchoolProfile(
+            school_name="No GRE U",
+            program_name="MS DS",
+            requirements={"gre_required": False},
+        )
+
+        markdown = render_summary_table([
+            (required, None),
+            (considered, None),
+            (not_considered, None),
+        ])
+
+        self.assertIn(
+            "| Rank | School | Program | Fit Score | Confidence | GRE | Deadline |",
+            markdown,
+        )
+        self.assertIn("| Required U | PhD CS | N/A | N/A | Required | N/A |", markdown)
+        self.assertIn("| Considered U | MS CS | N/A | N/A | Considered | N/A |", markdown)
+        self.assertIn("| No GRE U | MS DS | N/A | N/A | Not Considered | N/A |", markdown)
 
 
 class StatsTests(unittest.TestCase):

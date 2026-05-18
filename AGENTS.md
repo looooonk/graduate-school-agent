@@ -164,6 +164,7 @@ The main Pydantic models live in `grad_agent/models.py`:
 
 - `SchoolProfile`
 - `Requirements`
+- `GREPolicy`
 - `ApplicantReports`
 - `JudgeReport`
 - `FlaggedField`
@@ -174,6 +175,7 @@ Model validators intentionally accept common LLM output variants, such as:
 
 - string values for list fields,
 - dict deadlines flattened into a string,
+- GRE policy variants normalized to `Required`, `Considered`, or `Not Considered`,
 - dict advisor entries converted into display strings,
 - dict source maps converted into URL lists,
 - list notes joined into one string.
@@ -185,7 +187,7 @@ Preserve these coercions unless a schema change is deliberate and covered by tes
 `reporting/markdown.py` renders:
 
 - one complete school report from `SchoolProfile`, optional `JudgeReport`, and optional `FitAssessment`,
-- one summary table ranked by confidence-adjusted fit score.
+- one summary table ranked by confidence-adjusted fit score, including a `GRE` column from `requirements.gre_policy`.
 
 Summary priority weights are:
 

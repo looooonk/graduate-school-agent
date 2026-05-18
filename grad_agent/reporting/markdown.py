@@ -31,7 +31,7 @@ def render_school_markdown(
     # --- Requirements ---
     req = profile.requirements
     req_lines = ["## Requirements\n"]
-    req_lines.append(f"- **GRE required**: {_yn(req.gre_required)}")
+    req_lines.append(f"- **GRE**: {_gre(req.gre_policy)}")
     if req.gpa_minimum:
         req_lines.append(f"- **GPA minimum**: {req.gpa_minimum}")
     req_lines.append(f"- **Statement of Purpose**: {_yn(req.statement_of_purpose)}")
@@ -122,8 +122,8 @@ def render_summary_table(
 
     lines = [
         "# Graduate School Research — Summary\n",
-        "| Rank | School | Program | Fit Score | Confidence | Deadline |",
-        "|------|--------|---------|-----------|------------|----------|",
+        "| Rank | School | Program | Fit Score | Confidence | GRE | Deadline |",
+        "|------|--------|---------|-----------|------------|-----|----------|",
     ]
     for i, (profile, fit) in enumerate(ranked, 1):
         score = f"{fit.overall_score:.2f}" if fit else "N/A"
@@ -131,7 +131,8 @@ def render_summary_table(
         deadline = profile.deadline or "N/A"
         lines.append(
             f"| {i} | {_md_cell(profile.school_name)} | {_md_cell(profile.program_name)} | "
-            f"{score} | {conf} | {_md_cell(deadline)} |"
+            f"{score} | {conf} | {_gre(profile.requirements.gre_policy)} | "
+            f"{_md_cell(deadline)} |"
         )
 
     return "\n".join(lines) + "\n"
@@ -143,6 +144,12 @@ def _yn(val: str | bool | None) -> str:
     if isinstance(val, str):
         return val
     return "Yes" if val else "No"
+
+
+def _gre(val: object) -> str:
+    if val is None:
+        return "N/A"
+    return str(getattr(val, "value", val))
 
 
 def _md_cell(value: str) -> str:
