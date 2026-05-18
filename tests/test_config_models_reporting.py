@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+import shlex
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -27,6 +30,17 @@ from grad_agent.reporting.stats import (
 )
 
 
+def _parse_shell_exports(output: str) -> dict[str, str]:
+    exports = {}
+    for line in output.splitlines():
+        parts = shlex.split(line)
+        if len(parts) != 2 or parts[0] != "export":
+            continue
+        key, value = parts[1].split("=", 1)
+        exports[key] = value
+    return exports
+
+
 class ConfigTests(unittest.TestCase):
     def test_load_merges_yaml_env_and_overrides(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -37,7 +51,13 @@ class ConfigTests(unittest.TestCase):
                         "models:",
                         "  haiku: yaml-haiku",
                         "  sonnet: yaml-sonnet",
+                        "  local_retrieval: yaml-qwen",
                         "retrieval:",
+                        "  backend: local_qwen_vllm",
+                        "  local_model_count: 1",
+                        "  local_base_urls:",
+                        "    - http://127.0.0.1:9001/v1",
+                        "  local_timeout: 120",
                         "  max_turns: 9",
                         "  max_search_results: 7",
                         "output:",
@@ -66,6 +86,12 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.brave_api_key, "brave-test-key")
         self.assertEqual(config.haiku_model, "yaml-haiku")
         self.assertEqual(config.sonnet_model, "yaml-sonnet")
+        self.assertEqual(config.local_retrieval_model, "yaml-qwen")
+        self.assertEqual(config.retrieval_backend, "local_qwen_vllm")
+        self.assertEqual(config.local_retrieval_model_count, 1)
+        self.assertEqual(config.local_retrieval_base_urls, ("http://127.0.0.1:9001/v1",))
+        self.assertEqual(config.local_retrieval_timeout, 120)
+        self.assertEqual(config.retrieval_model, "yaml-qwen")
         self.assertEqual(config.max_retrieval_turns, 3)
         self.assertEqual(config.max_search_results, 7)
         self.assertEqual(config.output_dir, "override-output")
@@ -77,6 +103,12 @@ class ConfigTests(unittest.TestCase):
             brave_api_key="",
             haiku_model="haiku",
             sonnet_model="sonnet",
+            local_retrieval_model="qwen",
+            retrieval_backend="bad",
+            local_retrieval_model_count=0,
+            local_retrieval_base_urls=(),
+            local_retrieval_api_key="",
+            local_retrieval_timeout=0,
             max_retrieval_turns=0,
             max_search_results=True,
             max_page_chars=10,
@@ -95,7 +127,143 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("BRAVE_API_KEY is required (set in environment or .env)", errors)
         self.assertIn("retrieval.max_turns must be an integer >= 1", errors)
         self.assertIn("retrieval.max_search_results must be an integer >= 1", errors)
+        self.assertIn("retrieval.backend must be one of: anthropic_haiku, local_qwen_vllm", errors)
+        self.assertIn("retrieval.local_model_count must be an integer >= 1", errors)
+        self.assertIn("retrieval.local_timeout must be an integer >= 1", errors)
         self.assertIn("http.retries must be an integer >= 0", errors)
+
+    def test_default_retrieval_backend_is_local_qwen(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "ANTHROPIC_API_KEY": "anthropic-test-key",
+                "BRAVE_API_KEY": "brave-test-key",
+            },
+            clear=True,
+        ), patch("grad_agent.config.dotenv.load_dotenv", return_value=True):
+            config = Config.load(yaml_path=Path("/does/not/exist.yaml"))
+
+        self.assertEqual(config.retrieval_backend, "local_qwen_vllm")
+        self.assertEqual(config.retrieval_model, "Qwen/Qwen3.6-35B-A3B-FP8")
+        self.assertEqual(config.local_retrieval_model_count, 4)
+        self.assertEqual(
+            config.local_retrieval_base_urls,
+            (
+                "http://127.0.0.1:8001/v1",
+                "http://127.0.0.1:8002/v1",
+                "http://127.0.0.1:8003/v1",
+                "http://127.0.0.1:8004/v1",
+            ),
+        )
+
+    def test_local_model_count_must_match_endpoint_count(self) -> None:
+        config = Config(
+            anthropic_api_key="anthropic",
+            brave_api_key="brave",
+            haiku_model="haiku",
+            sonnet_model="sonnet",
+            local_retrieval_model="qwen",
+            retrieval_backend="local_qwen_vllm",
+            local_retrieval_model_count=2,
+            local_retrieval_base_urls=("http://127.0.0.1:8001/v1",),
+            local_retrieval_api_key="",
+            local_retrieval_timeout=60,
+            max_retrieval_turns=2,
+            max_search_results=3,
+            max_page_chars=1000,
+            retry_gap_fill=True,
+            gap_fill_max_turns=1,
+            max_schools_parallel=1,
+            http_timeout=10,
+            http_retries=0,
+            output_dir="output",
+            logs_dir="",
+        )
+
+        self.assertIn(
+            "retrieval.local_model_count must match the number of "
+            "retrieval.local_base_urls endpoints",
+            config.validate(),
+        )
+
+    def test_local_model_count_defaults_to_endpoint_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "retrieval:",
+                        "  local_base_urls:",
+                        "    - http://127.0.0.1:8001/v1",
+                        "    - http://127.0.0.1:8002/v1",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.dict(
+                os.environ,
+                {
+                    "ANTHROPIC_API_KEY": "anthropic-test-key",
+                    "BRAVE_API_KEY": "brave-test-key",
+                },
+                clear=True,
+            ), patch("grad_agent.config.dotenv.load_dotenv", return_value=True):
+                config = Config.load(config_path)
+
+        self.assertEqual(config.local_retrieval_model_count, 2)
+        self.assertEqual(
+            config.local_retrieval_base_urls,
+            ("http://127.0.0.1:8001/v1", "http://127.0.0.1:8002/v1"),
+        )
+
+    def test_deploy_config_env_uses_config_yaml_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "models:",
+                        "  local_retrieval: test/model",
+                        "retrieval:",
+                        "  local_model_count: 2",
+                        "  local_base_urls:",
+                        "    - http://127.0.0.1:9101/v1",
+                        "    - http://127.0.0.1:9102/v1",
+                        "deploy:",
+                        "  host: 0.0.0.0",
+                        "  vllm_args:",
+                        "    - --trust-remote-code",
+                        "    - --dtype",
+                        "    - auto",
+                        "  log_dir: node-logs/vllm",
+                        "  micromamba_env: test-env",
+                        "  python_version: '3.11'",
+                        "  pip_packages:",
+                        "    - vllm==1.0.0",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            script = Path(__file__).parents[1] / "deploy" / "config-env.py"
+
+            output = subprocess.check_output(
+                [sys.executable, str(script), str(config_path)], text=True
+            )
+
+        exports = _parse_shell_exports(output)
+        self.assertEqual(exports["DEPLOY_MODEL_ID"], "test/model")
+        self.assertEqual(exports["DEPLOY_MODEL_COUNT"], "2")
+        self.assertEqual(exports["DEPLOY_VLLM_PORTS"], "9101 9102")
+        self.assertEqual(
+            exports["DEPLOY_VLLM_ENDPOINTS"],
+            "http://127.0.0.1:9101/v1 http://127.0.0.1:9102/v1",
+        )
+        self.assertEqual(exports["DEPLOY_VLLM_ARGS"], "--trust-remote-code --dtype auto")
+        self.assertTrue(exports["DEPLOY_VLLM_LOG_DIR"].endswith("node-logs/vllm"))
+        self.assertEqual(exports["DEPLOY_MICROMAMBA_ENV"], "test-env")
+        self.assertEqual(exports["DEPLOY_SYSTEM_PACKAGES"], "curl git build-essential tmux")
+        self.assertEqual(exports["DEPLOY_PIP_PACKAGES"], "vllm==1.0.0")
 
 
 class ModelCoercionTests(unittest.TestCase):

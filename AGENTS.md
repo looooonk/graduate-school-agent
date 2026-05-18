@@ -11,7 +11,7 @@
 
 ## Project Overview
 
-This repository implements a graduate school research agent using the Anthropic Python SDK. It researches graduate programs, evaluates profile quality, assesses applicant fit against a CV, and writes Markdown reports.
+This repository implements a graduate school research agent using local Qwen retrieval through vLLM plus Anthropic Sonnet for judging and fit assessment. It researches graduate programs, evaluates profile quality, assesses applicant fit against a CV, and writes Markdown reports.
 
 The installed CLI entry point is:
 
@@ -19,7 +19,7 @@ The installed CLI entry point is:
 grad-agent
 ```
 
-Primary runtime dependencies are `anthropic`, `pydantic`, `httpx`, `pyyaml`, `python-dotenv`, and `rich`.
+Primary Python runtime dependencies are `anthropic`, `pydantic`, `httpx`, `pyyaml`, `python-dotenv`, and `rich`. Default retrieval also expects one or more local OpenAI-compatible vLLM servers running `Qwen/Qwen3.6-35B-A3B-FP8`.
 
 ## Development Environment
 
@@ -37,19 +37,21 @@ The environment name is local-specific. If it is unavailable, use an equivalent 
 Pipeline per school:
 
 ```text
-retrieval (Haiku) -> judge (Sonnet) + fit (Sonnet) -> Markdown output
-                    -> optional gap-fill (Haiku) -> re-judge + re-fit
+retrieval (local Qwen vLLM by default) -> judge (Sonnet) + fit (Sonnet) -> Markdown output
+                                      -> optional gap-fill (same retrieval backend) -> re-judge + re-fit
 ```
 
 Important behavior:
 
-- `retrieval` uses Claude Haiku with two Anthropic tools: `web_search` and `fetch_page`.
+- Default `retrieval` uses local `Qwen/Qwen3.6-35B-A3B-FP8` through the configured OpenAI-compatible vLLM endpoints.
+- The alternate retrieval backend is Claude Haiku via Anthropic native tool calls. Select it with `retrieval.backend: anthropic_haiku` or `--retrieval-backend anthropic_haiku`.
+- Local Qwen retrieval uses a strict JSON command loop for two tools: `web_search` and `fetch_page`.
 - `web_search` calls Brave Search.
 - `fetch_page` fetches HTTP(S) URLs with `httpx`, strips HTML, and truncates to `config.max_page_chars`.
 - `judge` and `fit` run concurrently for a single school with `asyncio.gather`.
 - Gap-fill runs only when enabled, the judge returns `insufficient`, and suggested queries are present.
-- Schools are currently processed sequentially in `run_all_schools`. `max_schools_parallel` is loaded from config and CLI but is not used for parallel execution yet.
-- `http.retries` is validated in config but is not currently applied by the tool handlers.
+- Schools run with bounded concurrency from `max_schools_parallel`.
+- `http.retries` is applied to local vLLM endpoint failover but is not currently applied by the fetch/search tool handlers.
 - Anthropic rate-limit retries are handled by `grad_agent.util.retry.api_create_with_retry`.
 
 ## Package Layout
@@ -59,10 +61,12 @@ grad_agent/
   cli.py                 argparse CLI entry point
   config.py              YAML, .env, and environment config loading
   events.py              pipeline event dataclasses
+  llm/
+    vllm.py              OpenAI-compatible local vLLM client
   models.py              Pydantic schemas
   tui.py                 Rich live terminal UI
   pipeline/
-    retrieval.py         Haiku retrieval loop
+    retrieval.py         Anthropic or local-vLLM retrieval loop
     judge.py             Sonnet quality judge
     fit.py               Sonnet CV-aware fit assessor
     runner.py            per-school orchestration and output writing
@@ -96,6 +100,7 @@ Secrets are environment-only:
 ```text
 ANTHROPIC_API_KEY
 BRAVE_API_KEY
+VLLM_API_KEY  # optional, only when local vLLM servers require bearer auth
 ```
 
 Do not add API keys to `config.yaml`, tests, docs examples with real values, or trajectory logs.
@@ -106,11 +111,20 @@ Current `config.yaml` keys:
 models:
   haiku: claude-haiku-4-5-20251001
   sonnet: claude-sonnet-4-6
+  local_retrieval: Qwen/Qwen3.6-35B-A3B-FP8
 
 retrieval:
+  backend: local_qwen_vllm
   max_turns: 25
   max_search_results: 5
   max_page_chars: 30000
+  local_model_count: 4
+  local_base_urls:
+    - http://127.0.0.1:8001/v1
+    - http://127.0.0.1:8002/v1
+    - http://127.0.0.1:8003/v1
+    - http://127.0.0.1:8004/v1
+  local_timeout: 600
 
 judge:
   retry_gap_fill: true
@@ -132,6 +146,45 @@ logs:
 
 Set `logs.dir: ""` to disable trajectory logging.
 
+## Local vLLM Usage
+
+Default runtime expects `retrieval.local_model_count` independent vLLM servers, one per GPU. The default config uses four local model copies:
+
+```text
+http://127.0.0.1:8001/v1
+http://127.0.0.1:8002/v1
+http://127.0.0.1:8003/v1
+http://127.0.0.1:8004/v1
+```
+
+For fewer or more GPUs, set `retrieval.local_model_count` to the number of model copies and provide the same number of endpoints in `retrieval.local_base_urls`. The app validates that these counts match and round-robins local retrieval calls across the endpoints.
+
+Deployment helpers live in `deploy/`:
+
+```bash
+deploy/start-vllm.sh
+```
+
+Health check:
+
+```bash
+deploy/healthcheck.sh
+```
+
+Run with the default local retrieval backend:
+
+```bash
+grad-agent --schools input/schools.json --cv input/cv.md
+```
+
+Switch retrieval back to Anthropic Haiku when local endpoints are unavailable:
+
+```bash
+grad-agent --schools input/schools.json --cv input/cv.md --retrieval-backend anthropic_haiku
+```
+
+The Python app does not launch or supervise vLLM. Keep server startup and node setup in `deploy/` scripts and docs.
+
 ## CLI Behavior
 
 Supported school inputs:
@@ -147,7 +200,8 @@ Useful flags:
 - `--output DIR`: override `output.dir`.
 - `--context PATH`: inject applicant context into all stages.
 - `--max-turns N`: override retrieval turn budget.
-- `--max-parallel N`: override config only; current execution remains sequential.
+- `--max-parallel N`: override max concurrent school pipelines.
+- `--retrieval-backend {anthropic_haiku,local_qwen_vllm}`: override retrieval backend.
 - `--no-gap-fill`: disable insufficient-profile gap-fill.
 - `--verbose`: disable the TUI and enable debug logs.
 
@@ -259,9 +313,10 @@ When changing prompts, model schemas, output rendering, config behavior, or CLI 
 
 ## Development Notes
 
-- Keep prompt text in `grad_agent/pipeline/prompts.py`; do not inline new stage prompts elsewhere.
+- Keep prompt text and local retrieval protocol text in `grad_agent/pipeline/prompts.py`; do not inline new stage prompts elsewhere.
 - Keep external tool schemas and handlers together in `grad_agent/pipeline/tools.py`.
 - Tool handlers should return strings suitable for LLM consumption, not structured Python objects.
+- Keep local vLLM endpoint calling in `grad_agent/llm/vllm.py`. Do not make the package responsible for launching vLLM processes.
 - Prefer `extract_json_object()` for parsing model JSON instead of duplicating parsing logic.
 - Use `SchoolProfile.model_validate`, `JudgeReport.model_validate`, and `FitAssessment.model_validate` at API boundaries.
 - Preserve partial-failure behavior in `run_school`: retrieval failure returns a stub result; judge, fit, and gap-fill errors are captured in stats instead of crashing the entire run.

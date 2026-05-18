@@ -18,6 +18,7 @@ _COST_PER_M: dict[str, tuple[float, float]] = {
     # (input, output) per 1M tokens
     "claude-haiku-4-5-20251001": (0.80, 4.00),
     "claude-sonnet-4-6": (3.00, 15.00),
+    "Qwen/Qwen3.6-35B-A3B-FP8": (0.00, 0.00),
 }
 
 _DEFAULT_COST = (3.00, 15.00)  # fallback

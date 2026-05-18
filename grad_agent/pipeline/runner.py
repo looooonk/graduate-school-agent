@@ -24,6 +24,7 @@ from grad_agent.events import (
     ToolCalled,
     TurnProgress,
 )
+from grad_agent.llm.vllm import LocalVLLMClient
 from grad_agent.models import (
     ConfidenceLevel,
     FitAssessment,
@@ -34,7 +35,7 @@ from grad_agent.models import (
 )
 from grad_agent.pipeline.fit import run_fit_assessment
 from grad_agent.pipeline.judge import run_judge
-from grad_agent.pipeline.retrieval import run_retrieval
+from grad_agent.pipeline.retrieval import run_local_profile_loop, run_retrieval
 from grad_agent.reporting.markdown import render_school_markdown, render_summary_table
 from grad_agent.reporting.stats import SchoolStats, StageStats, StatsCollector, add_usage, timed
 from grad_agent.reporting.trajectory import TrajectoryLogger
@@ -55,6 +56,7 @@ async def run_school(
     context_text: str = "",
     on_event: EventCallback | None = None,
     traj: TrajectoryLogger | None = None,
+    local_client: LocalVLLMClient | None = None,
 ) -> tuple[SchoolResult, SchoolStats]:
     """Run the full 3-stage pipeline for a single school.
 
@@ -85,7 +87,15 @@ async def run_school(
             if on_event:
                 on_event(StageStarted(school=school_label, stage="retrieval"))
             profile, retrieval_stats = await run_retrieval(
-                school_name, program_name, config, client, http, context_text, on_event, traj,
+                school_name,
+                program_name,
+                config,
+                client,
+                http,
+                context_text,
+                on_event,
+                traj,
+                local_client,
             )
             school_stats.stages.append(retrieval_stats)
             log.info("Retrieval complete")
@@ -159,6 +169,7 @@ async def run_school(
                     on_event,
                     traj,
                     context_text=context_text,
+                    local_client=local_client,
                 )
                 school_stats.stages.append(gap_stats)
 
@@ -204,6 +215,7 @@ async def _run_gap_fill(
     on_event: EventCallback | None = None,
     traj: TrajectoryLogger | None = None,
     context_text: str = "",
+    local_client: LocalVLLMClient | None = None,
 ) -> tuple[SchoolProfile, StageStats]:
     """Re-run a targeted retrieval pass using the judge's suggested queries.
 
@@ -227,7 +239,7 @@ async def _run_gap_fill(
 
     school_label = f"{profile.school_name} — {profile.program_name}"
     log = get_school_logger(__name__, school_label)
-    stats = StageStats(stage="gap_fill", model=config.haiku_model)
+    stats = StageStats(stage="gap_fill", model=config.retrieval_model)
 
     existing_json = profile.model_dump_json(indent=2)
     context_section = (
@@ -261,6 +273,20 @@ async def _run_gap_fill(
         },
     ]
 
+    if config.uses_local_retrieval:
+        return await run_local_profile_loop(
+            school_name=profile.school_name,
+            program_name=profile.program_name,
+            config=config,
+            http=http,
+            initial_prompt=messages[0]["content"],
+            stage="gap_fill",
+            max_turns=config.gap_fill_max_turns,
+            on_event=on_event,
+            traj=traj,
+            local_client=local_client,
+        )
+
     with timed() as elapsed:
         for turn in range(1, config.gap_fill_max_turns + 1):
             log.info("Gap-fill turn %d/%d", turn, config.gap_fill_max_turns)
@@ -275,7 +301,7 @@ async def _run_gap_fill(
 
             response = await api_create_with_retry(
                 lambda: client.messages.create(
-                    model=config.haiku_model,
+                    model=config.retrieval_model,
                     max_tokens=4096,
                     system=RETRIEVAL_SYSTEM,
                     tools=TOOL_DEFINITIONS,
@@ -285,7 +311,7 @@ async def _run_gap_fill(
             stats.api_calls += 1
             add_usage(stats, response.usage)
             if traj:
-                traj.log_api_response("gap_fill", turn, config.haiku_model, response)
+                traj.log_api_response("gap_fill", turn, config.retrieval_model, response)
 
             if response.stop_reason == "tool_use":
                 tool_results = []
@@ -378,7 +404,7 @@ async def run_all_schools(
     context_text: str = "",
     on_event: EventCallback | None = None,
 ) -> StatsCollector:
-    """Launch pipelines for all schools sequentially to avoid rate limits.
+    """Launch pipelines for all schools with bounded concurrency.
 
     Args:
         schools: List of (school_name, program_name) tuples.
@@ -404,51 +430,94 @@ async def run_all_schools(
         logger.info("Trajectory logs → %s", run_log_dir)
 
     client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key)
+    local_client = LocalVLLMClient.from_config(config) if config.uses_local_retrieval else None
 
     async with httpx.AsyncClient() as http:
-        all_results: list[tuple[SchoolResult, SchoolStats]] = []
-
         total = len(schools)
-        for idx, (school_name, program_name) in enumerate(schools, start=1):
-            school_label = f"{school_name} — {program_name}"
-            if on_event:
-                on_event(SchoolStarted(school=school_label, idx=idx, total=total))
+        all_results: list[tuple[SchoolResult, SchoolStats] | None] = [None] * total
+        semaphore = asyncio.Semaphore(config.max_schools_parallel)
 
-            traj_ctx = (
-                TrajectoryLogger(run_log_dir / f"{_safe_filename(school_name, program_name)}.jsonl")
-                if run_log_dir else nullcontext()
-            )
-            with traj_ctx as traj:
-                result, stats = await run_school(
-                    school_name, program_name, cv_text, config, client, http,
-                    context_text, on_event, traj,
+        async def run_one(idx: int, school_name: str, program_name: str) -> None:
+            async with semaphore:
+                await _run_one_school(
+                    idx,
+                    total,
+                    school_name,
+                    program_name,
+                    cv_text,
+                    config,
+                    client,
+                    http,
+                    context_text,
+                    output_dir,
+                    run_log_dir,
+                    collector,
+                    all_results,
+                    on_event,
+                    local_client,
                 )
-            if on_event:
-                on_event(SchoolDone(
-                    school=school_label,
-                    success=stats.success,
-                    elapsed=stats.elapsed_seconds,
-                    cost=stats.total_cost_usd,
-                ))
-            collector.add_school(stats)
-            all_results.append((result, stats))
 
-            md = render_school_markdown(result.profile, result.judge, result.fit)
-            safe_name = _safe_filename(school_name, program_name)
-            path = output_dir / f"{safe_name}_profile.md"
-            path.write_text(md, encoding="utf-8")
-            logger.info("Wrote %s", path)
+        await asyncio.gather(
+            *(run_one(idx, school_name, program_name)
+              for idx, (school_name, program_name) in enumerate(schools, start=1))
+        )
 
     # Write summary table
-    summary_data = [
-        (r.profile, r.fit) for r, _ in all_results
-    ]
+    completed_results = [item for item in all_results if item is not None]
+    summary_data = [(result.profile, result.fit) for result, _ in completed_results]
     summary_md = render_summary_table(summary_data)
     summary_path = output_dir / "summary.md"
     summary_path.write_text(summary_md, encoding="utf-8")
     logger.info("Wrote %s", summary_path)
 
     return collector
+
+
+async def _run_one_school(
+    idx: int,
+    total: int,
+    school_name: str,
+    program_name: str,
+    cv_text: str,
+    config: Config,
+    client: anthropic.AsyncAnthropic,
+    http: httpx.AsyncClient,
+    context_text: str,
+    output_dir: Path,
+    run_log_dir: Path | None,
+    collector: StatsCollector,
+    all_results: list[tuple[SchoolResult, SchoolStats] | None],
+    on_event: EventCallback | None,
+    local_client: LocalVLLMClient | None,
+) -> None:
+    school_label = f"{school_name} — {program_name}"
+    if on_event:
+        on_event(SchoolStarted(school=school_label, idx=idx, total=total))
+
+    traj_ctx = (
+        TrajectoryLogger(run_log_dir / f"{_safe_filename(school_name, program_name)}.jsonl")
+        if run_log_dir else nullcontext()
+    )
+    with traj_ctx as traj:
+        result, stats = await run_school(
+            school_name, program_name, cv_text, config, client, http,
+            context_text, on_event, traj, local_client,
+        )
+    if on_event:
+        on_event(SchoolDone(
+            school=school_label,
+            success=stats.success,
+            elapsed=stats.elapsed_seconds,
+            cost=stats.total_cost_usd,
+        ))
+    collector.add_school(stats)
+    all_results[idx - 1] = (result, stats)
+
+    md = render_school_markdown(result.profile, result.judge, result.fit)
+    safe_name = _safe_filename(school_name, program_name)
+    path = output_dir / f"{safe_name}_profile.md"
+    path.write_text(md, encoding="utf-8")
+    logger.info("Wrote %s", path)
 
 
 def _safe_filename(school: str, program: str) -> str:

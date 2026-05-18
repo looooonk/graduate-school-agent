@@ -15,8 +15,10 @@ import httpx
 
 from grad_agent.config import Config
 from grad_agent.events import EventCallback, ToolCalled, TurnProgress
+from grad_agent.llm.vllm import LocalVLLMClient
 from grad_agent.models import SchoolProfile
 from grad_agent.pipeline.prompts import (
+    LOCAL_RETRIEVAL_PROTOCOL,
     RETRIEVAL_SYSTEM,
     retrieval_turn_status,
     retrieval_user_prompt,
@@ -43,6 +45,7 @@ async def run_retrieval(
     context_text: str = "",
     on_event: EventCallback | None = None,
     traj: TrajectoryLogger | None = None,
+    local_client: LocalVLLMClient | None = None,
 ) -> tuple[SchoolProfile, StageStats]:
     """Run the Haiku retrieval agent for a single school.
 
@@ -61,9 +64,25 @@ async def run_retrieval(
         A tuple of (SchoolProfile, StageStats). If the turn budget is exhausted
         without a valid profile, returns a minimal stub profile with a warning note.
     """
-    log = get_school_logger(__name__, f"{school_name} — {program_name}")
-    stats = StageStats(stage="retrieval", model=config.haiku_model)
     school_label = f"{school_name} — {program_name}"
+    if config.uses_local_retrieval:
+        return await run_local_profile_loop(
+            school_name=school_name,
+            program_name=program_name,
+            config=config,
+            http=http,
+            initial_prompt=retrieval_user_prompt(
+                school_name, program_name, context_text, config.max_retrieval_turns,
+            ),
+            stage="retrieval",
+            max_turns=config.max_retrieval_turns,
+            on_event=on_event,
+            traj=traj,
+            local_client=local_client,
+        )
+
+    log = get_school_logger(__name__, school_label)
+    stats = StageStats(stage="retrieval", model=config.retrieval_model)
 
     if traj:
         traj.log_stage_start("retrieval")
@@ -100,7 +119,7 @@ async def run_retrieval(
             add_usage(stats, response.usage)
 
             if traj:
-                traj.log_api_response("retrieval", turn, config.haiku_model, response)
+                traj.log_api_response("retrieval", turn, config.retrieval_model, response)
 
             if response.stop_reason == "tool_use":
                 tool_results: list[dict[str, Any]] = []
@@ -220,3 +239,123 @@ def _summarize_args(args: dict[str, Any]) -> str:
     if "url" in args:
         return f"url={args['url']!r}"
     return str(args)
+
+
+async def run_local_profile_loop(
+    *,
+    school_name: str,
+    program_name: str,
+    config: Config,
+    http: httpx.AsyncClient,
+    initial_prompt: str,
+    stage: str,
+    max_turns: int,
+    on_event: EventCallback | None = None,
+    traj: TrajectoryLogger | None = None,
+    local_client: LocalVLLMClient | None = None,
+) -> tuple[SchoolProfile, StageStats]:
+    """Run retrieval using a local OpenAI-compatible model and JSON tool commands."""
+    school_label = f"{school_name} — {program_name}"
+    log = get_school_logger(__name__, school_label)
+    stats = StageStats(stage=stage, model=config.retrieval_model)
+    client = local_client or LocalVLLMClient.from_config(config)
+
+    if traj:
+        traj.log_stage_start(stage)
+
+    messages = [
+        {"role": "system", "content": f"{RETRIEVAL_SYSTEM}\n\n{LOCAL_RETRIEVAL_PROTOCOL}"},
+        {"role": "user", "content": initial_prompt},
+    ]
+
+    with timed() as elapsed:
+        for turn in range(1, max_turns + 1):
+            log.info("%s turn %d/%d", stage, turn, max_turns)
+            if on_event:
+                on_event(TurnProgress(school=school_label, turn=turn, max_turns=max_turns))
+
+            response = await client.create(
+                http,
+                model=config.retrieval_model,
+                messages=messages,
+                max_tokens=4096,
+            )
+            stats.api_calls += 1
+            add_usage(stats, response.usage)
+            if traj:
+                traj.log_api_response(stage, turn, config.retrieval_model, response)
+
+            full_text = response.text.strip()
+            parsed = _extract_json_from_text(full_text)
+            if parsed is None:
+                log.warning("No JSON found in local model output (turn %d)", turn)
+                messages.append({"role": "assistant", "content": full_text})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Output exactly one JSON object: either a tool command "
+                        "or the complete SchoolProfile. Do not include prose."
+                    ),
+                })
+                continue
+
+            tool_name = parsed.get("tool")
+            if isinstance(tool_name, str):
+                args = parsed.get("args")
+                if not isinstance(args, dict):
+                    args = {}
+                stats.tool_calls += 1
+                log.info("Tool call: %s(%s)", tool_name, _summarize_args(args))
+                if on_event:
+                    on_event(ToolCalled(school=school_label, tool_name=tool_name))
+                result = await dispatch_tool(tool_name, args, config, http, school_label)
+                if traj:
+                    traj.log_tool_result(stage, turn, tool_name, args, result)
+                messages.append({"role": "assistant", "content": full_text})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"Tool result for {tool_name}:\n\n{result}\n\n"
+                        f"{retrieval_turn_status(turn, max_turns)}"
+                    ),
+                })
+                continue
+
+            parsed["school_name"] = school_name
+            parsed["program_name"] = program_name
+            try:
+                profile = SchoolProfile.model_validate(parsed)
+                stats.elapsed_seconds = elapsed[0]
+                log.info(
+                    "Profile complete — %d sources, %d research areas, %d advisors",
+                    len(profile.sources),
+                    len(profile.research_areas),
+                    len(profile.advisor_candidates),
+                )
+                if traj:
+                    traj.log_profile(profile)
+                    traj.log_stage_end(stage, elapsed[0])
+                return profile, stats
+            except Exception as exc:
+                log.warning("Profile validation failed: %s", exc)
+                messages.append({"role": "assistant", "content": full_text})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"Your SchoolProfile JSON had a validation error: {exc}\n"
+                        f"Fix it and output ONLY the complete SchoolProfile JSON."
+                    ),
+                })
+
+    stats.elapsed_seconds = elapsed[0]
+    if traj:
+        traj.log_stage_end(stage, elapsed[0])
+    log.warning("Turn budget exhausted — returning stub profile")
+    return SchoolProfile(
+        school_name=school_name,
+        program_name=program_name,
+        notes=(
+            "WARNING: Retrieval agent exhausted turn budget without producing "
+            "a complete profile."
+        ),
+    ), stats
