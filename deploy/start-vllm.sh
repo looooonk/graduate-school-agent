@@ -28,12 +28,6 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 
-startup_timeout="${DEPLOY_VLLM_STARTUP_TIMEOUT:-600}"
-if ! [[ "$startup_timeout" =~ ^[1-9][0-9]*$ ]]; then
-  echo "DEPLOY_VLLM_STARTUP_TIMEOUT must be an integer >= 1" >&2
-  exit 1
-fi
-
 runner=()
 if ! command -v vllm >/dev/null 2>&1; then
   micromamba_bin="$(command -v micromamba || true)"
@@ -120,9 +114,8 @@ for ((gpu = 0; gpu < DEPLOY_MODEL_COUNT; gpu++)); do
   ready[$gpu]=0
 done
 
-deadline=$((SECONDS + startup_timeout))
 remaining="$DEPLOY_MODEL_COUNT"
-echo "waiting up to ${startup_timeout}s for vLLM endpoints to become ready"
+echo "waiting for vLLM endpoints to become ready"
 
 while ((remaining > 0)); do
   for ((gpu = 0; gpu < DEPLOY_MODEL_COUNT; gpu++)); do
@@ -152,17 +145,6 @@ while ((remaining > 0)); do
 
   if ((remaining == 0)); then
     break
-  fi
-  if ((SECONDS >= deadline)); then
-    echo "timed out waiting for ${remaining} vLLM endpoint(s) to become ready" >&2
-    for ((gpu = 0; gpu < DEPLOY_MODEL_COUNT; gpu++)); do
-      if [[ "${ready[$gpu]}" != "1" ]]; then
-        echo "not ready on GPU ${gpu}: ${endpoints[$gpu]}" >&2
-        tail_log "${log_files[$gpu]}"
-      fi
-    done
-    stop_servers
-    exit 1
   fi
   sleep 2
 done
