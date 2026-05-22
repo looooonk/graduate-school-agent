@@ -17,6 +17,7 @@ from pathlib import Path
 from grad_agent.config import Config
 from grad_agent.events import EventCallback
 from grad_agent.pipeline.runner import run_all_schools
+from grad_agent.reporting.summary import rebuild_summary_from_profiles
 from grad_agent.util.log import setup_logging
 
 
@@ -28,6 +29,7 @@ def _parse_args() -> argparse.Namespace:
             "Examples:\n"
             "  grad-agent --schools input/schools.json --cv input/cv.md\n"
             '  grad-agent --school "MIT" --program "MS CS" --cv input/cv.md\n'
+            "  grad-agent --summary-from output\n"
         ),
     )
 
@@ -42,6 +44,11 @@ def _parse_args() -> argparse.Namespace:
         "--school",
         type=str,
         help="Single school name (use with --program)",
+    )
+    school_group.add_argument(
+        "--summary-from",
+        type=Path,
+        help="Rebuild summary.md from existing rendered profile Markdown",
     )
 
     parser.add_argument(
@@ -154,6 +161,15 @@ def main() -> None:
     args = _parse_args()
     setup_logging(verbose=args.verbose)
     log = logging.getLogger(__name__)
+
+    if args.summary_from is not None:
+        try:
+            summary_path = rebuild_summary_from_profiles(args.summary_from, args.output)
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Wrote {summary_path}")
+        return
 
     # Load CV
     cv_path: Path = args.cv

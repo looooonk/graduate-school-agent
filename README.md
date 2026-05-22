@@ -102,6 +102,7 @@ grad-agent --schools input/schools.json --cv input/cv.md --retrieval-backend ant
 ```bash
 grad-agent --schools input/schools.json --cv input/cv.md
 grad-agent --school "School Name" --program "Program Name" --cv input/cv.md
+grad-agent --summary-from output
 ```
 
 Useful options:
@@ -113,6 +114,7 @@ Useful options:
 - `--max-parallel N`: override max concurrent school pipelines.
 - `--retrieval-backend {anthropic_haiku,local_qwen_vllm}`: choose Claude Haiku retrieval or local vLLM Qwen retrieval.
 - `--no-gap-fill`: disable targeted gap-fill on insufficient profiles.
+- `--summary-from PATH`: rebuild `summary.md` from existing rendered profile Markdown without model calls.
 - `--verbose`: bypass the Rich TUI and print debug logs to stderr.
 
 ## Output

@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import io
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,6 +26,7 @@ from grad_agent.pipeline.tools import (
     handle_fetch_page,
     handle_web_search,
 )
+from grad_agent.reporting.summary import load_profile_summaries
 
 
 def _test_config(**overrides: object) -> Config:
@@ -487,6 +489,72 @@ class CliTests(unittest.TestCase):
             cli._load_schools(args)
 
         self.assertEqual(exc.exception.code, 1)
+
+    def test_summary_from_does_not_require_cv_or_schools(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = root / "example_ms_cs_profile.md"
+            profile.write_text(
+                "\n".join(
+                    [
+                        "# Example University \u2014 MS CS",
+                        "",
+                        "**Deadline**: January 15, 2027 [unverified]  ",
+                        "**Application fee**: $75",
+                        "",
+                        "---",
+                        "",
+                        "## Requirements",
+                        "",
+                        "- **GRE**: Not Considered",
+                        "",
+                        "---",
+                        "",
+                        "## Fit Summary",
+                        "",
+                        "- **Overall score**: 0.83 / 1.00",
+                        "- **Confidence**: high",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with (
+                patch.object(sys, "argv", ["grad-agent", "--summary-from", str(root)]),
+                contextlib.redirect_stdout(stdout),
+            ):
+                cli.main()
+
+            summary = (root / "summary.md").read_text(encoding="utf-8")
+            self.assertIn(
+                "| 1 | Example University | MS CS | 0.83 | high | Not Considered |",
+                summary,
+            )
+            self.assertIn("Wrote", stdout.getvalue())
+
+    def test_load_profile_summaries_parses_rendered_profile_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "example_profile.md"
+            path.write_text(
+                "\n".join(
+                    [
+                        "# Example - PhD CS",
+                        "**Deadline**: *not found*",
+                        "- **GRE**: Required",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            profile, fit = load_profile_summaries(path)[0]
+
+            self.assertEqual(profile.school_name, "Example")
+            self.assertEqual(profile.program_name, "PhD CS")
+            self.assertIsNone(profile.deadline)
+            self.assertEqual(profile.requirements.gre_policy.value, "Required")
+            self.assertIsNone(fit)
 
 
 if __name__ == "__main__":
