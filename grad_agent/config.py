@@ -20,8 +20,6 @@ _DEFAULT_YAML_PATH = Path("config.yaml")
 _DEFAULT_LOCAL_RETRIEVAL_BASE_URLS = (
     "http://127.0.0.1:8001/v1",
     "http://127.0.0.1:8002/v1",
-    "http://127.0.0.1:8003/v1",
-    "http://127.0.0.1:8004/v1",
 )
 _RETRIEVAL_BACKENDS = {"anthropic_haiku", "local_qwen_vllm"}
 

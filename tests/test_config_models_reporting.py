@@ -160,8 +160,8 @@ class ConfigTests(unittest.TestCase):
 
         self.assertEqual(config.retrieval_backend, "local_qwen_vllm")
         self.assertEqual(config.retrieval_model, "Qwen/Qwen3.6-35B-A3B-FP8")
-        self.assertEqual(config.local_retrieval_model_count, 4)
-        self.assertEqual(config.local_retrieval_parallel_agents, 4)
+        self.assertEqual(config.local_retrieval_model_count, 2)
+        self.assertEqual(config.local_retrieval_parallel_agents, 2)
         self.assertEqual(config.local_retrieval_max_parallel_tool_calls, 8)
         self.assertEqual(config.max_schools_parallel, 8)
         self.assertEqual(config.max_sonnet_parallel, 8)
@@ -170,8 +170,6 @@ class ConfigTests(unittest.TestCase):
             (
                 "http://127.0.0.1:8001/v1",
                 "http://127.0.0.1:8002/v1",
-                "http://127.0.0.1:8003/v1",
-                "http://127.0.0.1:8004/v1",
             ),
         )
 

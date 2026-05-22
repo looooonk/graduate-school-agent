@@ -12,14 +12,12 @@ retrieval:
   max_turns: 25
   max_search_results: 5
   max_page_chars: 30000
-  local_model_count: 4
-  local_parallel_agents: 4
+  local_model_count: 2
+  local_parallel_agents: 2
   local_max_parallel_tool_calls: 8
   local_base_urls:
     - http://127.0.0.1:8001/v1
     - http://127.0.0.1:8002/v1
-    - http://127.0.0.1:8003/v1
-    - http://127.0.0.1:8004/v1
   local_timeout: 600
 
 judge:
