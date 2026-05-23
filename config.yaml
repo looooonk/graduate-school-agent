@@ -6,8 +6,8 @@ models:
   sonnet: claude-sonnet-4-6
   local_retrieval: Qwen/Qwen3.6-35B-A3B-FP8
 
+# Available backends: anthropic_haiku, local_qwen_vllm
 retrieval:
-  # Available backends: anthropic_haiku, local_qwen_vllm
   backend: local_qwen_vllm
   max_turns: 25
   max_search_results: 5
