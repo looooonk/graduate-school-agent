@@ -357,3 +357,4 @@ When changing prompts, model schemas, output rendering, config behavior, or CLI 
 - Use `SchoolProfile.model_validate`, `JudgeReport.model_validate`, and `FitAssessment.model_validate` at API boundaries.
 - Preserve partial-failure behavior in `run_school`: retrieval failure returns a stub result; judge, fit, and gap-fill errors are captured in stats instead of crashing the entire run.
 - Keep generated output paths filesystem-safe through `reporting.paths.safe_filename()`.
+- Do not edit `TODO.md` unless told to.
