@@ -1,0 +1,2 @@
+- Update TUI to accomodate large lists of schools
+- Update prompting to de-centralize fit scoring using few-shot prompting and better system prompts
