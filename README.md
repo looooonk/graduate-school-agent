@@ -1,6 +1,6 @@
 # Graduate School Agent
 
-An LLM-based research agent that gathers graduate program information, evaluates source quality, scores applicant fit against a CV, and writes Markdown reports.
+An LLM-based research agent that gathers graduate program information, evaluates source quality, scores applicant fit against a CV, and writes Markdown plus PDF reports.
 
 The agent is intended for application planning: it searches official program pages, faculty pages, and informal applicant reports, then produces a structured profile for each school plus a ranked summary.
 
@@ -10,7 +10,7 @@ The agent is intended for application planning: it searches official program pag
 - Quality judging with Claude Sonnet to flag missing, stale, contradictory, or weakly sourced fields.
 - CV-aware fit assessment with Claude Sonnet.
 - Optional gap-fill pass when the judge rates a profile as insufficient.
-- Markdown output for each school and a confidence-adjusted summary table.
+- Markdown and PDF output for each school plus a confidence-adjusted summary table.
 - Optional JSONL trajectory logs with model responses and tool results.
 - Rich terminal UI for interactive runs.
 
@@ -19,6 +19,7 @@ The agent is intended for application planning: it searches official program pag
 - Python 3.11 or newer
 - Anthropic API key
 - Brave Search API key
+- WeasyPrint native libraries for PDF rendering, such as Pango, Cairo, and GDK-PixBuf
 - One or more local OpenAI-compatible vLLM endpoints for default retrieval, or `--retrieval-backend anthropic_haiku`
 
 Install the package in editable mode:
@@ -102,27 +103,29 @@ grad-agent --schools input/schools.json --cv input/cv.md --retrieval-backend ant
 ```bash
 grad-agent --schools input/schools.json --cv input/cv.md
 grad-agent --school "School Name" --program "Program Name" --cv input/cv.md
-grad-agent --summary-from output
+grad-agent --summary-from output/markdown
 ```
 
 Useful options:
 
 - `--config PATH`: load a different YAML config file.
-- `--output DIR`: override the configured Markdown output directory.
+- `--output DIR`: override the configured report output root.
 - `--context PATH`: use an applicant context file.
 - `--max-turns N`: override retrieval turn budget.
 - `--max-parallel N`: override max concurrent school pipelines.
 - `--retrieval-backend {anthropic_haiku,local_qwen_vllm}`: choose Claude Haiku retrieval or local vLLM Qwen retrieval.
 - `--no-gap-fill`: disable targeted gap-fill on insufficient profiles.
-- `--summary-from PATH`: rebuild `summary.md` from existing rendered profile Markdown without model calls.
+- `--summary-from PATH`: rebuild `markdown/summary.md` and `pdf/summary.pdf` from existing rendered profile Markdown without model calls.
 - `--verbose`: bypass the Rich TUI and print debug logs to stderr.
 
 ## Output
 
-By default, output is written to `output/`:
+By default, reports are written under `output/`:
 
-- `{school}_{program}_profile.md`: one report per school.
-- `summary.md`: ranked table across all schools.
+- `markdown/{school}_{program}_profile.md`: one Markdown report per school.
+- `markdown/summary.md`: ranked Markdown table across all schools.
+- `pdf/{school}_{program}_profile.pdf`: PDF version of each Markdown report.
+- `pdf/summary.pdf`: PDF version of the ranked summary.
 
 When `logs.dir` is non-empty in `config.yaml`, trajectory logs are written to `logs/{YYYY-MM-DDTHHMMSS}/`. Each school gets one JSONL file containing stage events, full model responses, tool results, final profiles, judge reports, and fit assessments.
 
@@ -142,7 +145,7 @@ Each profile includes:
 Each school runs through this pipeline:
 
 ```text
-retrieval (local Qwen by default) -> judge (Sonnet) + fit (Sonnet) -> Markdown output
+retrieval (local Qwen by default) -> judge (Sonnet) + fit (Sonnet) -> Markdown/PDF output
                                   -> optional gap-fill (same retrieval backend) -> re-judge + re-fit
 ```
 
@@ -222,6 +225,11 @@ deploy:
     - curl
     - git
     - build-essential
+    - libcairo2
+    - libpango-1.0-0
+    - libpangoft2-1.0-0
+    - libgdk-pixbuf-2.0-0
+    - shared-mime-info
   pip_packages:
     - vllm
 ```
@@ -325,6 +333,7 @@ grad_agent/
     tools.py             Brave search and page fetch tools
   reporting/
     markdown.py          Markdown rendering
+    pdf.py               PDF rendering from Markdown
     stats.py             token, cost, and timing stats
     trajectory.py        JSONL trajectory logging
   util/

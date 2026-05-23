@@ -29,7 +29,7 @@ def _parse_args() -> argparse.Namespace:
             "Examples:\n"
             "  grad-agent --schools input/schools.json --cv input/cv.md\n"
             '  grad-agent --school "MIT" --program "MS CS" --cv input/cv.md\n'
-            "  grad-agent --summary-from output\n"
+            "  grad-agent --summary-from output/markdown\n"
         ),
     )
 
@@ -48,7 +48,7 @@ def _parse_args() -> argparse.Namespace:
     school_group.add_argument(
         "--summary-from",
         type=Path,
-        help="Rebuild summary.md from existing rendered profile Markdown",
+        help="Rebuild markdown/summary.md and pdf/summary.pdf from rendered profile Markdown",
     )
 
     parser.add_argument(
@@ -81,7 +81,7 @@ def _parse_args() -> argparse.Namespace:
         "--output",
         type=Path,
         default=None,
-        help="Output directory for Markdown reports (overrides config.yaml)",
+        help="Output root for Markdown and PDF reports (overrides config.yaml)",
     )
     parser.add_argument(
         "-v", "--verbose",

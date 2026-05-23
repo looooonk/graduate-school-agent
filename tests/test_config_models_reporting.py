@@ -22,6 +22,7 @@ from grad_agent.models import (
 )
 from grad_agent.pipeline.runner import _safe_filename, calibrate_fit_confidence
 from grad_agent.reporting.markdown import render_school_markdown, render_summary_table
+from grad_agent.reporting.pdf import pdf_path_for_markdown, report_dirs
 from grad_agent.reporting.stats import (
     SchoolStats,
     StageStats,
@@ -282,7 +283,11 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(exports["DEPLOY_VLLM_ARGS"], "--trust-remote-code --dtype auto")
         self.assertTrue(exports["DEPLOY_VLLM_LOG_DIR"].endswith("node-logs/vllm"))
         self.assertEqual(exports["DEPLOY_MICROMAMBA_ENV"], "test-env")
-        self.assertEqual(exports["DEPLOY_SYSTEM_PACKAGES"], "curl git build-essential tmux")
+        self.assertEqual(
+            exports["DEPLOY_SYSTEM_PACKAGES"],
+            "curl git build-essential tmux libcairo2 libpango-1.0-0 "
+            "libpangoft2-1.0-0 libgdk-pixbuf-2.0-0 shared-mime-info",
+        )
         self.assertEqual(exports["DEPLOY_PIP_PACKAGES"], "vllm==1.0.0")
 
 
@@ -385,6 +390,12 @@ class MarkdownRenderingTests(unittest.TestCase):
 
         self.assertLess(markdown.index("| 1 | With Fit"), markdown.index("| 2 | No Fit"))
         self.assertIn("| 2 | No Fit | MS | N/A | N/A | N/A | N/A |", markdown)
+
+    def test_pdf_path_mirrors_markdown_report_name(self) -> None:
+        dirs = report_dirs(Path("output"))
+        pdf_path = pdf_path_for_markdown(Path("output/markdown/example_profile.md"), dirs)
+
+        self.assertEqual(pdf_path, Path("output/pdf/example_profile.pdf"))
 
     def test_gre_policy_is_normalized_and_rendered_in_summary(self) -> None:
         required = SchoolProfile(

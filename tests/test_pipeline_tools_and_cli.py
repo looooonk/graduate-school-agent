@@ -493,7 +493,9 @@ class CliTests(unittest.TestCase):
     def test_summary_from_does_not_require_cv_or_schools(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            profile = root / "example_ms_cs_profile.md"
+            markdown_dir = root / "markdown"
+            markdown_dir.mkdir()
+            profile = markdown_dir / "example_ms_cs_profile.md"
             profile.write_text(
                 "\n".join(
                     [
@@ -521,13 +523,22 @@ class CliTests(unittest.TestCase):
             )
 
             stdout = io.StringIO()
+            def fake_write_markdown_report(path: Path, text: str, _dirs: object) -> Path:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+                return path.with_suffix(".pdf")
+
             with (
                 patch.object(sys, "argv", ["grad-agent", "--summary-from", str(root)]),
+                patch(
+                    "grad_agent.reporting.summary.write_markdown_report",
+                    side_effect=fake_write_markdown_report,
+                ),
                 contextlib.redirect_stdout(stdout),
             ):
                 cli.main()
 
-            summary = (root / "summary.md").read_text(encoding="utf-8")
+            summary = (markdown_dir / "summary.md").read_text(encoding="utf-8")
             self.assertIn(
                 "| 1 | Example University | MS CS | 0.83 | high | Not Considered |",
                 summary,

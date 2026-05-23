@@ -11,7 +11,7 @@
 
 ## Project Overview
 
-This repository implements a graduate school research agent using local Qwen retrieval through vLLM plus Anthropic Sonnet for judging and fit assessment. It researches graduate programs, evaluates profile quality, assesses applicant fit against a CV, and writes Markdown reports.
+This repository implements a graduate school research agent using local Qwen retrieval through vLLM plus Anthropic Sonnet for judging and fit assessment. It researches graduate programs, evaluates profile quality, assesses applicant fit against a CV, and writes Markdown and PDF reports.
 
 The installed CLI entry point is:
 
@@ -19,7 +19,7 @@ The installed CLI entry point is:
 grad-agent
 ```
 
-Primary Python runtime dependencies are `anthropic`, `pydantic`, `httpx`, `pyyaml`, `python-dotenv`, and `rich`. Default retrieval also expects one or more local OpenAI-compatible vLLM servers running `Qwen/Qwen3.6-35B-A3B-FP8`.
+Primary Python runtime dependencies are `anthropic`, `pydantic`, `httpx`, `pyyaml`, `python-dotenv`, `rich`, `markdown`, and `weasyprint`. Default retrieval also expects one or more local OpenAI-compatible vLLM servers running `Qwen/Qwen3.6-35B-A3B-FP8`.
 
 ## Development Environment
 
@@ -37,7 +37,7 @@ The environment name is local-specific. If it is unavailable, use an equivalent 
 Pipeline per school:
 
 ```text
-retrieval (local Qwen vLLM by default) -> judge (Sonnet) + fit (Sonnet) -> Markdown output
+retrieval (local Qwen vLLM by default) -> judge (Sonnet) + fit (Sonnet) -> Markdown/PDF output
                                       -> optional gap-fill (same retrieval backend) -> re-judge + re-fit
 ```
 
@@ -76,6 +76,7 @@ grad_agent/
     tools.py             Brave search and page fetch tool handlers
   reporting/
     markdown.py          report and summary rendering
+    pdf.py               Markdown-to-PDF rendering and report directory helpers
     stats.py             token, cost, timing, and run statistics
     trajectory.py        per-school JSONL trajectory logger
   util/
@@ -158,6 +159,11 @@ deploy:
     - git
     - build-essential
     - tmux
+    - libcairo2
+    - libpango-1.0-0
+    - libpangoft2-1.0-0
+    - libgdk-pixbuf-2.0-0
+    - shared-mime-info
   pip_packages:
     - vllm
 
@@ -214,7 +220,7 @@ grad-agent --school "MIT" --program "PhD EECS" --cv input/cv.md
 Useful flags:
 
 - `--config PATH`: use a custom YAML config.
-- `--output DIR`: override `output.dir`.
+- `--output DIR`: override the report output root from `output.dir`.
 - `--context PATH`: inject applicant context into all stages.
 - `--max-turns N`: override retrieval turn budget.
 - `--max-parallel N`: override max concurrent school pipelines.
@@ -234,8 +240,10 @@ Inputs:
 
 Outputs:
 
-- `output/{school}_{program}_profile.md`: one Markdown report per school.
-- `output/summary.md`: ranked Markdown summary table.
+- `output/markdown/{school}_{program}_profile.md`: one Markdown report per school.
+- `output/markdown/summary.md`: ranked Markdown summary table.
+- `output/pdf/{school}_{program}_profile.pdf`: PDF version of each school report.
+- `output/pdf/summary.pdf`: PDF version of the summary table.
 - `logs/{YYYY-MM-DDTHHMMSS}/{school_slug}.jsonl`: optional trajectory logs.
 
 `input/`, `output/`, and `logs/` are expected to contain local or generated data. Avoid relying on non-example files in tests.
@@ -270,6 +278,8 @@ Preserve these coercions unless a schema change is deliberate and covered by tes
 
 - one complete school report from `SchoolProfile`, optional `JudgeReport`, and optional `FitAssessment`,
 - one summary table ranked by confidence-adjusted fit score, including a `GRE` column from `requirements.gre_policy`.
+
+`reporting/pdf.py` converts generated Markdown reports to simple styled PDFs with `markdown` and `weasyprint`. Future report writes should keep raw Markdown under `output/markdown/` and matching PDFs under `output/pdf/`.
 
 Summary priority weights are:
 

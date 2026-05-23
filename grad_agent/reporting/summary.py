@@ -7,6 +7,7 @@ from pathlib import Path
 
 from grad_agent.models import FitAssessment, Requirements, SchoolProfile
 from grad_agent.reporting.markdown import render_summary_table
+from grad_agent.reporting.pdf import ensure_report_dirs, write_markdown_report
 
 _TITLE_RE = re.compile(r"^#\s+(.+?)\s+(?:\u2014|-)\s+(.+?)\s*$", re.MULTILINE)
 _DEADLINE_RE = re.compile(r"^\*\*Deadline\*\*:\s*(.*?)\s*$", re.MULTILINE)
@@ -18,10 +19,9 @@ _CONFIDENCE_RE = re.compile(r"^-\s+\*\*Confidence\*\*:\s*(high|medium|low)\s*$",
 def rebuild_summary_from_profiles(input_path: Path, output_dir: Path | None = None) -> Path:
     """Read rendered profile Markdown and write a rebuilt summary table."""
     profiles = load_profile_summaries(input_path)
-    target_dir = output_dir or (input_path.parent if input_path.is_file() else input_path)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    summary_path = target_dir / "summary.md"
-    summary_path.write_text(render_summary_table(profiles), encoding="utf-8")
+    dirs = ensure_report_dirs(_summary_output_root(input_path, output_dir))
+    summary_path = dirs.markdown_dir / "summary.md"
+    write_markdown_report(summary_path, render_summary_table(profiles), dirs)
     return summary_path
 
 
@@ -34,6 +34,8 @@ def load_profile_summaries(input_path: Path) -> list[tuple[SchoolProfile, FitAss
 
 
 def _profile_paths(input_path: Path) -> list[Path]:
+    if input_path.is_dir() and (input_path / "markdown").is_dir():
+        input_path = input_path / "markdown"
     if input_path.is_file():
         return [input_path]
     if not input_path.exists():
@@ -42,6 +44,15 @@ def _profile_paths(input_path: Path) -> list[Path]:
     if paths:
         return paths
     return sorted(path for path in input_path.glob("*.md") if path.name != "summary.md")
+
+
+def _summary_output_root(input_path: Path, output_dir: Path | None) -> Path:
+    if output_dir is not None:
+        return output_dir
+    if input_path.is_file():
+        parent = input_path.parent
+        return parent.parent if parent.name == "markdown" else parent
+    return input_path.parent if input_path.name == "markdown" else input_path
 
 
 def _parse_profile_summary(path: Path) -> tuple[SchoolProfile, FitAssessment | None]:

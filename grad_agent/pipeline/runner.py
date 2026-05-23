@@ -42,6 +42,7 @@ from grad_agent.pipeline.retrieval import (
     run_retrieval,
 )
 from grad_agent.reporting.markdown import render_school_markdown, render_summary_table
+from grad_agent.reporting.pdf import ReportDirs, ensure_report_dirs, write_markdown_report
 from grad_agent.reporting.stats import SchoolStats, StageStats, StatsCollector, add_usage, timed
 from grad_agent.reporting.trajectory import TrajectoryLogger
 from grad_agent.util.json import extract_json_object
@@ -476,8 +477,7 @@ async def run_all_schools(
         StatsCollector with aggregated results for all schools.
     """
     collector = StatsCollector()
-    output_dir = Path(config.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dirs = ensure_report_dirs(Path(config.output_dir))
 
     # Build the run-scoped log directory once, or None if logging is disabled.
     run_log_dir: Path | None = None
@@ -508,7 +508,7 @@ async def run_all_schools(
                     client,
                     http,
                     context_text,
-                    output_dir,
+                    output_dirs,
                     run_log_dir,
                     collector,
                     all_results,
@@ -526,8 +526,8 @@ async def run_all_schools(
     completed_results = [item for item in all_results if item is not None]
     summary_data = [(result.profile, result.fit) for result, _ in completed_results]
     summary_md = render_summary_table(summary_data)
-    summary_path = output_dir / "summary.md"
-    summary_path.write_text(summary_md, encoding="utf-8")
+    summary_path = output_dirs.markdown_dir / "summary.md"
+    write_markdown_report(summary_path, summary_md, output_dirs)
     logger.info("Wrote %s", summary_path)
 
     return collector
@@ -543,7 +543,7 @@ async def _run_one_school(
     client: anthropic.AsyncAnthropic,
     http: httpx.AsyncClient,
     context_text: str,
-    output_dir: Path,
+    output_dirs: ReportDirs,
     run_log_dir: Path | None,
     collector: StatsCollector,
     all_results: list[tuple[SchoolResult, SchoolStats] | None],
@@ -576,8 +576,8 @@ async def _run_one_school(
 
     md = render_school_markdown(result.profile, result.judge, result.fit)
     safe_name = _safe_filename(school_name, program_name)
-    path = output_dir / f"{safe_name}_profile.md"
-    path.write_text(md, encoding="utf-8")
+    path = output_dirs.markdown_dir / f"{safe_name}_profile.md"
+    await asyncio.to_thread(write_markdown_report, path, md, output_dirs)
     logger.info("Wrote %s", path)
 
 
