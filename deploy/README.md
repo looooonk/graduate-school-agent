@@ -26,19 +26,19 @@ The default endpoints are:
 ```text
 http://127.0.0.1:8001/v1
 http://127.0.0.1:8002/v1
-http://127.0.0.1:8003/v1
-http://127.0.0.1:8004/v1
 ```
 
-For fewer GPUs, edit `config.yaml` so the model count and endpoints match the
-node. For two GPUs:
+For a different number of GPUs, edit `config.yaml` so the model count and endpoints match the
+node. For four GPUs:
 
 ```yaml
 retrieval:
-  local_model_count: 2
+  local_model_count: 4
   local_base_urls:
     - http://127.0.0.1:8001/v1
     - http://127.0.0.1:8002/v1
+    - http://127.0.0.1:8003/v1
+    - http://127.0.0.1:8004/v1
 ```
 
 The scripts map endpoint `N` to GPU `N`. Do not set vLLM tensor parallelism

@@ -46,7 +46,7 @@ Important behavior:
 - Default `retrieval` uses local `Qwen/Qwen3.6-35B-A3B-FP8` through the configured OpenAI-compatible vLLM endpoints.
 - The alternate retrieval backend is Claude Haiku via Anthropic native tool calls. Select it with `retrieval.backend: anthropic_haiku` or `--retrieval-backend anthropic_haiku`.
 - Local Qwen retrieval uses a strict JSON command loop for two tools: `web_search` and `fetch_page`. It may emit either one tool command or a batched `tools` list per turn.
-- Local retrieval defaults to four parallel agents per school on the 4 x A100 topology. Agents focus on full profile, admissions, faculty, and applicant-report evidence, then merge into one `SchoolProfile`.
+- Local retrieval defaults to two parallel agents per school on a 2 x H100 topology. Agents focus on full profile, admissions, faculty, and applicant-report evidence, then merge into one `SchoolProfile`.
 - Anthropic Haiku retrieval can emit multiple native tool-use blocks in one response; tool handlers run concurrently.
 - `web_search` calls Brave Search.
 - `fetch_page` fetches HTTP(S) URLs with `httpx`, strips HTML, and truncates to `config.max_page_chars`.
@@ -120,14 +120,12 @@ retrieval:
   max_turns: 25
   max_search_results: 5
   max_page_chars: 30000
-  local_model_count: 4
-  local_parallel_agents: 4
+  local_model_count: 2
+  local_parallel_agents: 2
   local_max_parallel_tool_calls: 8
   local_base_urls:
     - http://127.0.0.1:8001/v1
     - http://127.0.0.1:8002/v1
-    - http://127.0.0.1:8003/v1
-    - http://127.0.0.1:8004/v1
   local_timeout: 600
 
 judge:
@@ -147,19 +145,33 @@ output:
 
 logs:
   dir: logs
+
+deploy:
+  host: 0.0.0.0
+  vllm_args:
+    - --trust-remote-code
+  log_dir: logs/vllm
+  micromamba_env: graduate-school-agent
+  python_version: "3.11"
+  system_packages:
+    - curl
+    - git
+    - build-essential
+    - tmux
+  pip_packages:
+    - vllm
+
 ```
 
 Set `logs.dir: ""` to disable trajectory logging.
 
 ## Local vLLM Usage
 
-Default runtime expects `retrieval.local_model_count` independent vLLM servers, one per GPU. The default config uses four local model copies:
+Default runtime expects `retrieval.local_model_count` independent vLLM servers, one per GPU. The default config uses two local model copies:
 
 ```text
 http://127.0.0.1:8001/v1
 http://127.0.0.1:8002/v1
-http://127.0.0.1:8003/v1
-http://127.0.0.1:8004/v1
 ```
 
 For fewer or more GPUs, set `retrieval.local_model_count` to the number of model copies and provide the same number of endpoints in `retrieval.local_base_urls`. Set `retrieval.local_parallel_agents` to the desired per-school local fanout, usually the endpoint count. The app validates that model count and endpoint count match, round-robins local retrieval calls across the endpoints, and lets local vLLM handle batching.
