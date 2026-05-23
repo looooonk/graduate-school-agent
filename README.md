@@ -1,45 +1,46 @@
 # Graduate School Agent
 
-An LLM-based research agent that gathers graduate program information, evaluates source quality, scores applicant fit against a CV, and writes Markdown plus PDF reports.
+An LLM research agent for graduate application planning. It gathers program information, checks source quality, assesses applicant fit against a CV, and writes Markdown and PDF reports.
 
-The agent is intended for application planning: it searches official program pages, faculty pages, and informal applicant reports, then produces a structured profile for each school plus a ranked summary.
+The default pipeline uses local Qwen retrieval through OpenAI-compatible vLLM endpoints, then Claude Sonnet for profile judging and fit assessment. Claude Haiku can be used as the retrieval backend when local vLLM is unavailable.
 
 ## Features
 
-- Agentic retrieval using Claude Haiku or local Qwen through vLLM, with parallel local retrieval agents and batched `web_search` / `fetch_page` tools.
-- Quality judging with Claude Sonnet to flag missing, stale, contradictory, or weakly sourced fields.
-- CV-aware fit assessment with Claude Sonnet.
-- Optional gap-fill pass when the judge rates a profile as insufficient.
-- Markdown and PDF output for each school plus a confidence-adjusted summary table.
-- Optional JSONL trajectory logs with model responses and tool results.
-- Rich terminal UI for interactive runs.
+- Web retrieval with Brave Search and page fetching.
+- Local Qwen/vLLM retrieval with parallel agents and batched tool calls.
+- Optional Anthropic Haiku retrieval backend.
+- Sonnet quality judging for missing, stale, contradictory, or weakly sourced fields.
+- Sonnet CV-aware fit assessment.
+- Optional gap-fill pass for insufficient profiles.
+- Markdown and PDF reports plus a ranked summary.
+- Rich terminal UI and optional JSONL trajectory logs.
 
 ## Requirements
 
-- Python 3.11 or newer
+- Python 3.11+
 - Anthropic API key
 - Brave Search API key
-- WeasyPrint native libraries for PDF rendering, such as Pango, Cairo, and GDK-PixBuf
-- One or more local OpenAI-compatible vLLM endpoints for default retrieval, or `--retrieval-backend anthropic_haiku`
+- WeasyPrint native libraries for PDF rendering
+- Local OpenAI-compatible vLLM endpoints for the default retrieval backend
 
-Install the package in editable mode:
+Install in editable mode:
 
 ```bash
 python3 -m pip install -e .
 ```
 
-Set secrets in your shell or in a local `.env` file:
+Set secrets in your shell or a local `.env` file:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 export BRAVE_API_KEY=BSA...
 ```
 
-`config.yaml` stores non-secret runtime settings only.
+`config.yaml` is for non-secret settings only. Set `VLLM_API_KEY` only if your vLLM endpoints require bearer-token auth.
 
 ## Quick Start
 
-Create the inputs:
+Create inputs:
 
 ```bash
 cp input/schools.example.json input/schools.json
@@ -47,61 +48,51 @@ $EDITOR input/schools.json
 $EDITOR input/cv.md
 ```
 
-Optional applicant context can be placed at `input/context.md`. It is injected into retrieval, judge, fit, and gap-fill prompts, and is useful for target subfields, advisor preferences, funding needs, geographic constraints, or scoring guidance.
+Optional applicant context can be placed at `input/context.md` for subfield interests, advisor preferences, funding needs, geographic constraints, or scoring guidance.
 
-Start the local retrieval servers if you are using the default config:
+Start and check local retrieval servers when using the default backend:
 
 ```bash
 deploy/start-vllm.sh
-```
-
-In another shell, check the configured endpoints:
-
-```bash
 deploy/healthcheck.sh
 ```
 
-Run the agent with local Qwen retrieval and Sonnet judge/fit:
+Run the agent:
 
 ```bash
 grad-agent
 ```
 
-Run a single school without a JSON file:
+Run one school without editing `input/schools.json`:
 
 ```bash
 grad-agent --school "MIT" --program "PhD Electrical Engineering and Computer Science" --cv input/cv.md
 ```
 
-To use Anthropic Haiku for retrieval instead of local Qwen:
+Use Anthropic Haiku for retrieval instead of local Qwen:
 
 ```bash
 grad-agent --retrieval-backend anthropic_haiku
 ```
 
-## Input Format
+## Inputs
 
-`input/schools.json` must be a list of objects with `school` and `program` keys:
+`input/schools.json` is a list of school/program objects:
 
 ```json
 [
   {
     "school": "Stanford University",
     "program": "MS Computer Science"
-  },
-  {
-    "school": "MIT",
-    "program": "PhD Electrical Engineering and Computer Science"
   }
 ]
 ```
 
-`input/cv.md` is plain text or Markdown. These paths come from `input.cv`, `input.context`,
-and `input.schools` in `config.yaml`. CLI path flags override config values. The default
-context path is `input/context.md`; if that default file is absent, it is skipped. If you
-configure or pass another context path, that file must exist.
+`input/cv.md` is plain text or Markdown. Defaults come from `input.cv`, `input.context`, and `input.schools` in `config.yaml`; CLI flags override them. The default context path, `input/context.md`, is skipped if absent. Any custom context path must exist.
 
-## CLI Options
+## CLI
+
+Common commands:
 
 ```bash
 grad-agent
@@ -110,239 +101,89 @@ grad-agent --school "School Name" --program "Program Name" --cv input/cv.md
 grad-agent --summary-from output/markdown
 ```
 
-Useful options:
+Useful flags:
 
-- `--config PATH`: load a different YAML config file.
-- `--output DIR`: override the configured report output root.
-- `--schools PATH`: override `input.schools` from config.
-- `--cv PATH`: override `input.cv` from config.
-- `--context PATH`: override `input.context` from config.
+- `--config PATH`: load another YAML config file.
+- `--output DIR`: override report output root.
+- `--schools PATH`, `--cv PATH`, `--context PATH`: override input paths.
 - `--max-turns N`: override retrieval turn budget.
 - `--max-parallel N`: override max concurrent school pipelines.
-- `--retrieval-backend {anthropic_haiku,local_qwen_vllm}`: choose Claude Haiku retrieval or local vLLM Qwen retrieval.
-- `--no-gap-fill`: disable targeted gap-fill on insufficient profiles.
-- `--summary-from PATH`: rebuild `markdown/summary.md` and `pdf/summary.pdf` from existing rendered profile Markdown without model calls.
-- `--verbose`: bypass the Rich TUI and print debug logs to stderr.
+- `--retrieval-backend {anthropic_haiku,local_qwen_vllm}`: choose retrieval backend.
+- `--no-gap-fill`: disable targeted gap-fill.
+- `--summary-from PATH`: rebuild summary reports from existing profile Markdown without model calls.
+- `--verbose`: bypass the Rich TUI and print debug logs.
 
-## Output
+## Outputs
 
-By default, reports are written under `output/`:
+Reports are written under `output/` by default:
 
-- `markdown/{school}_{program}_profile.md`: one Markdown report per school.
-- `markdown/summary.md`: ranked Markdown table across all schools.
-- `pdf/{school}_{program}_profile.pdf`: PDF version of each Markdown report.
-- `pdf/summary.pdf`: PDF version of the ranked summary.
+- `markdown/{school}_{program}_profile.md`
+- `markdown/summary.md`
+- `pdf/{school}_{program}_profile.pdf`
+- `pdf/summary.pdf`
 
-When `logs.dir` is non-empty in `config.yaml`, trajectory logs are written to `logs/{YYYY-MM-DDTHHMMSS}/`. Each school gets one JSONL file containing stage events, full model responses, tool results, final profiles, judge reports, and fit assessments.
-
-Each profile includes:
-
-1. Header with school, program, deadline, and fee.
-2. Formal requirements.
-3. Research areas and advisor candidates.
-4. Essay prompts, when found.
-5. Applicant landscape from informal reports, when found.
-6. Fit summary.
-7. Quality assessment and flags.
-8. Sources and notes.
+When `logs.dir` is non-empty, trajectory logs are written to `logs/{YYYY-MM-DDTHHMMSS}/`. These logs include full model responses and tool results, so treat them as sensitive local artifacts.
 
 ## Pipeline
 
-Each school runs through this pipeline:
-
 ```text
-retrieval (local Qwen by default) -> judge (Sonnet) + fit (Sonnet) -> Markdown/PDF output
-                                  -> optional gap-fill (same retrieval backend) -> re-judge + re-fit
+retrieval -> judge + fit -> Markdown/PDF
+          -> optional gap-fill -> re-judge + re-fit
 ```
 
-Stage details:
+- `retrieval` produces a structured `SchoolProfile` using Brave Search and fetched web pages.
+- `judge` evaluates completeness, source quality, consistency, freshness, and actionability.
+- `fit` compares the profile with the applicant CV and optional context.
+- `gap-fill` runs only when enabled and the judge marks the initial profile insufficient.
 
-- `retrieval`: the configured retrieval backend searches the web through Brave and fetches pages with HTTPX, then emits a `SchoolProfile` JSON object.
-- `local_qwen_vllm` retrieval calls the OpenAI-compatible vLLM chat completions API. By default, two local agents run per school against the configured endpoints, each focused on a different evidence slice, and their profiles are merged.
-- Local retrieval can issue batched JSON tool commands in a single turn; the app executes those searches or fetches concurrently.
-- `anthropic_haiku` retrieval uses Anthropic native tool calls with the same tool handlers. Multiple tool-use blocks in one model response are executed concurrently.
-- `judge`: Claude Sonnet evaluates profile coverage, source quality, consistency, program match, cycle freshness, and actionability.
-- `fit`: Claude Sonnet compares the profile against the applicant CV and optional context.
-- `gap-fill`: if enabled, runs targeted retrieval using the judge's suggested queries when the initial profile is insufficient.
-
-Judge and fit run concurrently for a school, including after gap-fill. Schools run with bounded concurrency from `max_schools_parallel`, and concurrent Sonnet calls are additionally bounded by `max_sonnet_parallel`.
+Schools run with bounded concurrency. Judge and fit calls run concurrently for each school and are separately bounded by `concurrency.max_sonnet_parallel`.
 
 ## Configuration
 
-Default `config.yaml`:
+`Config.load()` merges built-in defaults, `config.yaml`, `.env`, and explicit CLI overrides. See `config.yaml` for current defaults.
 
-```yaml
-models:
-  haiku: claude-haiku-4-5-20251001
-  sonnet: claude-sonnet-4-6
-  local_retrieval: Qwen/Qwen3.6-35B-A3B-FP8
+- `retrieval.backend`: `local_qwen_vllm` or `anthropic_haiku`.
+- `input.*`: default CV, context, and schools paths.
+- `retrieval.local_model_count` and `retrieval.local_base_urls`: local vLLM topology.
+- `retrieval.local_parallel_agents`: per-school local retrieval fanout.
+- `concurrency.*`: school and Sonnet concurrency limits.
+- `logs.dir`: set to `""` to disable trajectory logging.
 
-input:
-  cv: input/cv.md
-  context: input/context.md
-  schools: input/schools.json
+## Local vLLM
 
-retrieval:
-  backend: local_qwen_vllm
-  max_turns: 25
-  max_search_results: 5
-  max_page_chars: 30000
-  local_model_count: 2
-  local_parallel_agents: 2
-  local_max_parallel_tool_calls: 8
-  local_base_urls:
-    - http://127.0.0.1:8001/v1
-    - http://127.0.0.1:8002/v1
-  local_timeout: 600
-
-judge:
-  retry_gap_fill: true
-  gap_fill_max_turns: 5
-
-concurrency:
-  max_schools_parallel: 8
-  max_sonnet_parallel: 8
-
-http:
-  timeout: 20
-  retries: 2
-
-output:
-  dir: output
-
-logs:
-  dir: logs
-
-deploy:
-  host: 0.0.0.0
-  vllm_args:
-    - --trust-remote-code
-  log_dir: logs/vllm
-  micromamba_env: graduate-school-agent
-  python_version: "3.11"
-  system_packages:
-    - curl
-    - git
-    - build-essential
-    - tmux
-    - libcairo2
-    - libpango-1.0-0
-    - libpangoft2-1.0-0
-    - libgdk-pixbuf-2.0-0
-    - shared-mime-info
-  pip_packages:
-    - vllm
-```
-
-Notes:
-
-- `.env` is loaded automatically from the current working tree.
-- `ANTHROPIC_API_KEY` is still required because judge and fit use Sonnet.
-- `BRAVE_API_KEY` is required for retrieval web search in both backends.
-- `input.cv`, `input.context`, and `input.schools` provide default input paths. `--cv`,
-  `--context`, and `--schools` override them.
-- `retrieval.backend` accepts `local_qwen_vllm` or `anthropic_haiku`.
-- `retrieval.local_model_count` is the number of local model copies the app expects. It must equal the number of `retrieval.local_base_urls` endpoints.
-- `retrieval.local_parallel_agents` controls how many independent local retrieval agents run per school. The default is 2 for a 2 x H100 setup.
-- `retrieval.local_max_parallel_tool_calls` caps the number of batched local tool commands executed concurrently from one model turn.
-- Local vLLM retrieval uses the OpenAI-compatible `/chat/completions` API and round-robins across `retrieval.local_base_urls`.
-- `concurrency.max_sonnet_parallel` caps concurrent Sonnet judge and fit calls separately from school pipeline concurrency.
-- Deployment scripts read non-secret deployment settings from `config.yaml`.
-- Set `VLLM_API_KEY` only if the vLLM servers require bearer-token authentication.
-- `http.retries` is applied to local vLLM endpoint failover, but not currently applied by the fetch/search tool handlers.
-- Set `logs.dir: ""` to disable trajectory logging.
-
-## Local vLLM Deployment
-
-The default retrieval model is `Qwen/Qwen3.6-35B-A3B-FP8`. The local topology is `retrieval.local_model_count` independent vLLM servers, one per GPU. The default topology targets a 2 x H100 instance with two local model copies:
+The default retrieval model is `Qwen/Qwen3.6-35B-A3B-FP8`. The default config expects two endpoints:
 
 ```text
-GPU 0 -> http://127.0.0.1:8001/v1
-GPU 1 -> http://127.0.0.1:8002/v1
+http://127.0.0.1:8001/v1
+http://127.0.0.1:8002/v1
 ```
 
-For a different GPU count, set `retrieval.local_model_count` to the available GPU count, provide the same number of endpoints, and set `retrieval.local_parallel_agents` to the desired fanout. The deployment scripts read the model count and endpoints directly. For one GPU:
+For a different GPU count, set `retrieval.local_model_count`, `retrieval.local_parallel_agents`, and `retrieval.local_base_urls` consistently. The Python app validates endpoint count, round-robins calls, and applies vLLM failover according to `http.retries`; it does not launch or supervise vLLM processes.
 
-```yaml
-retrieval:
-  local_model_count: 1
-  local_parallel_agents: 1
-  local_base_urls:
-    - http://127.0.0.1:8001/v1
-```
-
-The app does not launch or supervise vLLM processes. It validates that `retrieval.local_model_count` matches `retrieval.local_base_urls`, then round-robins retrieval calls across those endpoints and fails over according to `http.retries`. With local retrieval, a single school can consume multiple endpoints concurrently because the retrieval fanout assumes local batching capacity and no provider rate limit.
-
-On a fresh GPU node, install system packages, micromamba, the agent package, and vLLM with:
+Deployment helpers:
 
 ```bash
 deploy/setup-node.sh
-```
-
-Then start the configured vLLM servers:
-
-```bash
 deploy/start-vllm.sh
+deploy/healthcheck.sh
 ```
 
-Launch settings such as host, vLLM args, log directory, environment name, and setup packages live under `deploy` in `config.yaml`. See `deploy/README.md` for the deployment-specific flow.
+See `deploy/README.md` for the deployment-specific flow.
 
 ## Development
 
-Run the test suite:
+Run tests and lint checks in the local micromamba environment:
 
 ```bash
-python3 -m unittest
+micromamba run -n graduate-school-agent python3 -m unittest
+micromamba run -n graduate-school-agent ruff check .
 ```
 
-Preview the Rich TUI with fake data and no API calls:
+If that environment is unavailable, use an equivalent Python 3.11+ environment and run `python3 -m unittest` plus `ruff check .`.
+
+Preview the TUI without API calls:
 
 ```bash
 python3 -m tests.preview_tui
-```
-
-The TUI header shows retrieval backend, local vLLM model/endpoint topology,
-local agent fanout, tool-call fanout, and school/Sonnet concurrency. Each
-school row shows the active stage, per-worker retrieval turns for parallel
-local runs, largest observed tool batch, elapsed time, and final cost.
-
-For a static text snapshot instead of a live preview:
-
-```bash
 python3 -m tests.preview_tui --snapshot
-```
-
-The package layout is:
-
-```text
-grad_agent/
-  cli.py                 argparse CLI entry point
-  cli_support.py         CLI input loading and config override helpers
-  config.py              YAML, .env, and environment config loading
-  events.py              pipeline events consumed by the TUI
-  llm/
-    vllm.py              OpenAI-compatible local vLLM client
-  models.py              Pydantic schemas
-  tui.py                 Rich live terminal UI
-  pipeline/
-    retrieval.py         Anthropic Haiku retrieval loop and backend dispatch
-    local_retrieval.py   local-vLLM JSON tool-command retrieval loops
-    gap_fill.py          targeted retrieval pass for insufficient profiles
-    tool_loop.py         shared tool command execution and tool events
-    confidence.py        judge-aware fit confidence calibration
-    judge.py             Sonnet quality judge
-    fit.py               Sonnet fit assessor
-    runner.py            per-school orchestration
-    prompts.py           system and user prompts
-    tools.py             Brave search and page fetch tools
-  reporting/
-    markdown.py          Markdown rendering
-    paths.py             filesystem-safe report path helpers
-    pdf.py               PDF rendering from Markdown
-    stats.py             token, cost, and timing stats
-    trajectory.py        JSONL trajectory logging
-  util/
-    json.py              model JSON extraction helpers
-    log.py               structured logging
-    retry.py             Anthropic rate-limit retry helper
 ```
