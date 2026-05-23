@@ -64,7 +64,7 @@ deploy/healthcheck.sh
 Run the agent with local Qwen retrieval and Sonnet judge/fit:
 
 ```bash
-grad-agent --schools input/schools.json --cv input/cv.md
+grad-agent
 ```
 
 Run a single school without a JSON file:
@@ -76,7 +76,7 @@ grad-agent --school "MIT" --program "PhD Electrical Engineering and Computer Sci
 To use Anthropic Haiku for retrieval instead of local Qwen:
 
 ```bash
-grad-agent --schools input/schools.json --cv input/cv.md --retrieval-backend anthropic_haiku
+grad-agent --retrieval-backend anthropic_haiku
 ```
 
 ## Input Format
@@ -96,11 +96,15 @@ grad-agent --schools input/schools.json --cv input/cv.md --retrieval-backend ant
 ]
 ```
 
-`input/cv.md` is plain text or Markdown. The default context path is `input/context.md`; if that default file is absent, it is skipped. If you pass `--context some/path.md`, that file must exist.
+`input/cv.md` is plain text or Markdown. These paths come from `input.cv`, `input.context`,
+and `input.schools` in `config.yaml`. CLI path flags override config values. The default
+context path is `input/context.md`; if that default file is absent, it is skipped. If you
+configure or pass another context path, that file must exist.
 
 ## CLI Options
 
 ```bash
+grad-agent
 grad-agent --schools input/schools.json --cv input/cv.md
 grad-agent --school "School Name" --program "Program Name" --cv input/cv.md
 grad-agent --summary-from output/markdown
@@ -110,7 +114,9 @@ Useful options:
 
 - `--config PATH`: load a different YAML config file.
 - `--output DIR`: override the configured report output root.
-- `--context PATH`: use an applicant context file.
+- `--schools PATH`: override `input.schools` from config.
+- `--cv PATH`: override `input.cv` from config.
+- `--context PATH`: override `input.context` from config.
 - `--max-turns N`: override retrieval turn budget.
 - `--max-parallel N`: override max concurrent school pipelines.
 - `--retrieval-backend {anthropic_haiku,local_qwen_vllm}`: choose Claude Haiku retrieval or local vLLM Qwen retrieval.
@@ -171,6 +177,11 @@ models:
   sonnet: claude-sonnet-4-6
   local_retrieval: Qwen/Qwen3.6-35B-A3B-FP8
 
+input:
+  cv: input/cv.md
+  context: input/context.md
+  schools: input/schools.json
+
 retrieval:
   backend: local_qwen_vllm
   max_turns: 25
@@ -228,6 +239,8 @@ Notes:
 - `.env` is loaded automatically from the current working tree.
 - `ANTHROPIC_API_KEY` is still required because judge and fit use Sonnet.
 - `BRAVE_API_KEY` is required for retrieval web search in both backends.
+- `input.cv`, `input.context`, and `input.schools` provide default input paths. `--cv`,
+  `--context`, and `--schools` override them.
 - `retrieval.backend` accepts `local_qwen_vllm` or `anthropic_haiku`.
 - `retrieval.local_model_count` is the number of local model copies the app expects. It must equal the number of `retrieval.local_base_urls` endpoints.
 - `retrieval.local_parallel_agents` controls how many independent local retrieval agents run per school. The default is 2 for a 2 x H100 setup.

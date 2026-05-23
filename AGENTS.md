@@ -47,6 +47,8 @@ Important behavior:
 - The alternate retrieval backend is Claude Haiku via Anthropic native tool calls. Select it with `retrieval.backend: anthropic_haiku` or `--retrieval-backend anthropic_haiku`.
 - Local Qwen retrieval uses a strict JSON command loop for two tools: `web_search` and `fetch_page`. It may emit either one tool command or a batched `tools` list per turn.
 - Local retrieval defaults to two parallel agents per school on a 2 x H100 topology. Agents focus on full profile, admissions, faculty, and applicant-report evidence, then merge into one `SchoolProfile`.
+- Default input paths come from `input.cv`, `input.context`, and `input.schools` in
+  `config.yaml`; CLI flags `--cv`, `--context`, and `--schools` override those values.
 - Anthropic Haiku retrieval can emit multiple native tool-use blocks in one response; tool handlers run concurrently.
 - `web_search` calls Brave Search.
 - `fetch_page` fetches HTTP(S) URLs with `httpx`, strips HTML, and truncates to `config.max_page_chars`.
@@ -121,6 +123,11 @@ models:
   haiku: claude-haiku-4-5-20251001
   sonnet: claude-sonnet-4-6
   local_retrieval: Qwen/Qwen3.6-35B-A3B-FP8
+
+input:
+  cv: input/cv.md
+  context: input/context.md
+  schools: input/schools.json
 
 retrieval:
   backend: local_qwen_vllm
@@ -203,13 +210,13 @@ deploy/healthcheck.sh
 Run with the default local retrieval backend:
 
 ```bash
-grad-agent --schools input/schools.json --cv input/cv.md
+grad-agent
 ```
 
 Switch retrieval back to Anthropic Haiku when local endpoints are unavailable:
 
 ```bash
-grad-agent --schools input/schools.json --cv input/cv.md --retrieval-backend anthropic_haiku
+grad-agent --retrieval-backend anthropic_haiku
 ```
 
 The Python app does not launch or supervise vLLM. Keep server startup and node setup in `deploy/` scripts and docs.
@@ -219,6 +226,7 @@ The Python app does not launch or supervise vLLM. Keep server startup and node s
 Supported school inputs:
 
 ```bash
+grad-agent
 grad-agent --schools input/schools.json --cv input/cv.md
 grad-agent --school "MIT" --program "PhD EECS" --cv input/cv.md
 ```
@@ -227,22 +235,24 @@ Useful flags:
 
 - `--config PATH`: use a custom YAML config.
 - `--output DIR`: override the report output root from `output.dir`.
-- `--context PATH`: inject applicant context into all stages.
+- `--schools PATH`: override the school list path from `input.schools`.
+- `--cv PATH`: override the applicant CV path from `input.cv`.
+- `--context PATH`: override the applicant context path from `input.context`.
 - `--max-turns N`: override retrieval turn budget.
 - `--max-parallel N`: override max concurrent school pipelines.
 - `--retrieval-backend {anthropic_haiku,local_qwen_vllm}`: override retrieval backend.
 - `--no-gap-fill`: disable insufficient-profile gap-fill.
 - `--verbose`: disable the TUI and enable debug logs.
 
-Default `--context input/context.md` is skipped if missing. A user-specified context path must exist.
+Configured `input.context: input/context.md` is skipped if missing. Any other configured or CLI-specified context path must exist.
 
 ## Inputs and Outputs
 
 Inputs:
 
-- `input/schools.json`: list of `{"school": "...", "program": "..."}` objects.
-- `input/cv.md`: applicant CV in plain text or Markdown.
-- `input/context.md`: optional applicant context.
+- `input.schools`: configured school list path; default `input/schools.json`.
+- `input.cv`: configured applicant CV path; default `input/cv.md`.
+- `input.context`: configured optional applicant context path; default `input/context.md`.
 
 Outputs:
 
