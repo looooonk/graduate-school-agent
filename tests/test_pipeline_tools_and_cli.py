@@ -46,6 +46,9 @@ def _test_config(**overrides: object) -> Config:
         "max_page_chars": 20,
         "local_retrieval_parallel_agents": 1,
         "local_retrieval_max_parallel_tool_calls": 8,
+        "cv_path": "input/cv.md",
+        "context_path": "input/context.md",
+        "schools_path": "input/schools.json",
         "retry_gap_fill": True,
         "gap_fill_max_turns": 2,
         "max_schools_parallel": 1,
@@ -482,11 +485,57 @@ class CliTests(unittest.TestCase):
 
             self.assertEqual(cli._load_schools(args), [("A", "MS CS"), ("B", "PhD CS")])
 
+    def test_load_schools_uses_configured_path_when_cli_path_omitted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "schools.json"
+            path.write_text(
+                json.dumps([{"school": "Configured", "program": "PhD CS"}]),
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(schools=None, school=None, program=None)
+
+            self.assertEqual(cli._load_schools(args, path), [("Configured", "PhD CS")])
+
+    def test_config_overrides_include_cli_input_paths(self) -> None:
+        args = argparse.Namespace(
+            max_turns=None,
+            max_parallel=None,
+            retrieval_backend=None,
+            cv=Path("custom/cv.md"),
+            context=Path("custom/context.md"),
+            schools=Path("custom/schools.json"),
+            no_gap_fill=False,
+            output=None,
+        )
+
+        self.assertEqual(
+            cli.config_overrides(args),
+            {
+                "cv_path": "custom/cv.md",
+                "context_path": "custom/context.md",
+                "schools_path": "custom/schools.json",
+            },
+        )
+
     def test_load_schools_requires_program_for_inline_school(self) -> None:
         args = argparse.Namespace(schools=None, school="A", program=None)
 
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exc:
             cli._load_schools(args)
+
+        self.assertEqual(exc.exception.code, 1)
+
+    def test_load_schools_requires_school_for_inline_program(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "schools.json"
+            path.write_text(
+                json.dumps([{"school": "Configured", "program": "PhD CS"}]),
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(schools=None, school=None, program="MS CS")
+
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exc:
+                cli._load_schools(args, path)
 
         self.assertEqual(exc.exception.code, 1)
 

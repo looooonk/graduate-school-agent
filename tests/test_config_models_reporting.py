@@ -53,6 +53,10 @@ class ConfigTests(unittest.TestCase):
                         "  haiku: yaml-haiku",
                         "  sonnet: yaml-sonnet",
                         "  local_retrieval: yaml-qwen",
+                        "input:",
+                        "  cv: yaml-cv.md",
+                        "  context: yaml-context.md",
+                        "  schools: yaml-schools.json",
                         "retrieval:",
                         "  backend: local_qwen_vllm",
                         "  local_model_count: 1",
@@ -84,7 +88,11 @@ class ConfigTests(unittest.TestCase):
             ), patch("grad_agent.config.dotenv.load_dotenv", return_value=True):
                 config = Config.load(
                     config_path,
-                    overrides={"max_retrieval_turns": 3, "output_dir": "override-output"},
+                    overrides={
+                        "max_retrieval_turns": 3,
+                        "cv_path": "override-cv.md",
+                        "output_dir": "override-output",
+                    },
                 )
 
         self.assertEqual(config.anthropic_api_key, "anthropic-test-key")
@@ -102,6 +110,9 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.max_retrieval_turns, 3)
         self.assertEqual(config.max_search_results, 7)
         self.assertEqual(config.max_sonnet_parallel, 4)
+        self.assertEqual(config.cv_path, "override-cv.md")
+        self.assertEqual(config.context_path, "yaml-context.md")
+        self.assertEqual(config.schools_path, "yaml-schools.json")
         self.assertEqual(config.output_dir, "override-output")
         self.assertEqual(config.logs_dir, "")
 
@@ -122,6 +133,9 @@ class ConfigTests(unittest.TestCase):
             max_page_chars=10,
             local_retrieval_parallel_agents=0,
             local_retrieval_max_parallel_tool_calls=0,
+            cv_path="input/cv.md",
+            context_path="input/context.md",
+            schools_path="input/schools.json",
             retry_gap_fill=True,
             gap_fill_max_turns=1,
             max_schools_parallel=2,
@@ -166,6 +180,9 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.local_retrieval_max_parallel_tool_calls, 8)
         self.assertEqual(config.max_schools_parallel, 8)
         self.assertEqual(config.max_sonnet_parallel, 8)
+        self.assertEqual(config.cv_path, "input/cv.md")
+        self.assertEqual(config.context_path, "input/context.md")
+        self.assertEqual(config.schools_path, "input/schools.json")
         self.assertEqual(
             config.local_retrieval_base_urls,
             (
@@ -191,6 +208,9 @@ class ConfigTests(unittest.TestCase):
             max_page_chars=1000,
             local_retrieval_parallel_agents=1,
             local_retrieval_max_parallel_tool_calls=8,
+            cv_path="input/cv.md",
+            context_path="input/context.md",
+            schools_path="input/schools.json",
             retry_gap_fill=True,
             gap_fill_max_turns=1,
             max_schools_parallel=1,

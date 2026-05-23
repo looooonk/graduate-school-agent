@@ -1,12 +1,13 @@
-# Graduate School Agent - Configuration
-# API keys are loaded from environment variables, not this file.
-
 models:
   haiku: claude-haiku-4-5-20251001
   sonnet: claude-sonnet-4-6
   local_retrieval: Qwen/Qwen3.6-35B-A3B-FP8
 
-# Available backends: anthropic_haiku, local_qwen_vllm
+input:
+  cv: input/cv.md
+  context: input/context.md
+  schools: input/schools.json
+
 retrieval:
   backend: local_qwen_vllm
   max_turns: 25

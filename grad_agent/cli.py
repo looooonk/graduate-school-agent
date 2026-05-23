@@ -33,11 +33,12 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
 
-    school_group = parser.add_mutually_exclusive_group(required=True)
+    school_group = parser.add_mutually_exclusive_group()
     school_group.add_argument(
         "--schools",
         type=Path,
-        help='Path to JSON file: [{"school": "...", "program": "..."}, ...]',
+        default=None,
+        help='Path to JSON file: [{"school": "...", "program": "..."}, ...] (overrides config)',
     )
     school_group.add_argument(
         "--school",
@@ -58,16 +59,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--cv",
         type=Path,
-        default=Path("input/cv.md"),
-        help="Path to the applicant's CV (default: input/cv.md)",
+        default=None,
+        help="Path to the applicant's CV (overrides config)",
     )
     parser.add_argument(
         "--context",
         type=Path,
-        default=Path("input/context.md"),
+        default=None,
         help=(
             "Path to applicant context file injected into every pipeline stage "
-            "(default: input/context.md; silently skipped if absent)"
+            "(overrides config; input/context.md is silently skipped if absent)"
         ),
     )
     parser.add_argument(
@@ -114,8 +115,10 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _load_schools(args: argparse.Namespace) -> list[tuple[str, str]]:
-    return load_schools(args)
+def _load_schools(
+    args: argparse.Namespace, schools_path: Path | None = None
+) -> list[tuple[str, str]]:
+    return load_schools(args, schools_path)
 
 
 def main() -> None:
@@ -132,19 +135,20 @@ def main() -> None:
         print(f"Wrote {summary_path}")
         return
 
-    cv_path: Path = args.cv
+    config = Config.load(yaml_path=args.config, overrides=config_overrides(args))
+
+    cv_path = Path(config.cv_path)
     cv_text = read_required_text(cv_path, "CV")
 
-    context_path: Path = args.context
+    context_path = Path(config.context_path)
     context_exists = context_path.exists()
     context_text = read_context(context_path)
     if context_exists:
         log.info("Loaded applicant context from %s", context_path)
 
-    schools = _load_schools(args)
+    schools = _load_schools(args, Path(config.schools_path))
     log.info("Loaded %d school(s) to research", len(schools))
 
-    config = Config.load(yaml_path=args.config, overrides=config_overrides(args))
     errors = config.validate()
     if errors:
         for e in errors:

@@ -49,6 +49,11 @@ class Config:
     local_retrieval_parallel_agents: int
     local_retrieval_max_parallel_tool_calls: int
 
+    # --- Inputs ---
+    cv_path: str
+    context_path: str
+    schools_path: str
+
     # --- Judge ---
     retry_gap_fill: bool
     gap_fill_max_turns: int
@@ -133,6 +138,9 @@ class Config:
                 "local_retrieval_max_parallel_tool_calls",
                 _get(raw, "retrieval.local_max_parallel_tool_calls", 8),
             ),
+            cv_path=ov.get("cv_path", _get(raw, "input.cv", "input/cv.md")),
+            context_path=ov.get("context_path", _get(raw, "input.context", "input/context.md")),
+            schools_path=ov.get("schools_path", _get(raw, "input.schools", "input/schools.json")),
             retry_gap_fill=ov.get("retry_gap_fill", _get(raw, "judge.retry_gap_fill", True)),
             gap_fill_max_turns=ov.get(
                 "gap_fill_max_turns", _get(raw, "judge.gap_fill_max_turns", 5)
