@@ -152,7 +152,7 @@ retrieval (local Qwen by default) -> judge (Sonnet) + fit (Sonnet) -> Markdown/P
 Stage details:
 
 - `retrieval`: the configured retrieval backend searches the web through Brave and fetches pages with HTTPX, then emits a `SchoolProfile` JSON object.
-- `local_qwen_vllm` retrieval calls the OpenAI-compatible vLLM chat completions API. By default, four local agents run per school against the configured endpoints, each focused on a different evidence slice, and their profiles are merged.
+- `local_qwen_vllm` retrieval calls the OpenAI-compatible vLLM chat completions API. By default, two local agents run per school against the configured endpoints, each focused on a different evidence slice, and their profiles are merged.
 - Local retrieval can issue batched JSON tool commands in a single turn; the app executes those searches or fetches concurrently.
 - `anthropic_haiku` retrieval uses Anthropic native tool calls with the same tool handlers. Multiple tool-use blocks in one model response are executed concurrently.
 - `judge`: Claude Sonnet evaluates profile coverage, source quality, consistency, program match, cycle freshness, and actionability.
@@ -176,14 +176,12 @@ retrieval:
   max_turns: 25
   max_search_results: 5
   max_page_chars: 30000
-  local_model_count: 4
-  local_parallel_agents: 4
+  local_model_count: 2
+  local_parallel_agents: 2
   local_max_parallel_tool_calls: 8
   local_base_urls:
     - http://127.0.0.1:8001/v1
     - http://127.0.0.1:8002/v1
-    - http://127.0.0.1:8003/v1
-    - http://127.0.0.1:8004/v1
   local_timeout: 600
 
 judge:
@@ -208,16 +206,6 @@ deploy:
   host: 0.0.0.0
   vllm_args:
     - --trust-remote-code
-    - --gpu-memory-utilization
-    - "0.95"
-    - --enable-prefix-caching
-    - --enable-chunked-prefill
-    - --max-num-batched-tokens
-    - "32768"
-    - --max-num-seqs
-    - "256"
-    - --kv-cache-dtype
-    - fp8_e5m2
   log_dir: logs/vllm
   micromamba_env: graduate-school-agent
   python_version: "3.11"
@@ -225,6 +213,7 @@ deploy:
     - curl
     - git
     - build-essential
+    - tmux
     - libcairo2
     - libpango-1.0-0
     - libpangoft2-1.0-0
@@ -241,7 +230,7 @@ Notes:
 - `BRAVE_API_KEY` is required for retrieval web search in both backends.
 - `retrieval.backend` accepts `local_qwen_vllm` or `anthropic_haiku`.
 - `retrieval.local_model_count` is the number of local model copies the app expects. It must equal the number of `retrieval.local_base_urls` endpoints.
-- `retrieval.local_parallel_agents` controls how many independent local retrieval agents run per school. The default is 4 for a 4 x A100 setup.
+- `retrieval.local_parallel_agents` controls how many independent local retrieval agents run per school. The default is 2 for a 2 x H100 setup.
 - `retrieval.local_max_parallel_tool_calls` caps the number of batched local tool commands executed concurrently from one model turn.
 - Local vLLM retrieval uses the OpenAI-compatible `/chat/completions` API and round-robins across `retrieval.local_base_urls`.
 - `concurrency.max_sonnet_parallel` caps concurrent Sonnet judge and fit calls separately from school pipeline concurrency.
@@ -252,24 +241,21 @@ Notes:
 
 ## Local vLLM Deployment
 
-The default retrieval model is `Qwen/Qwen3.6-35B-A3B-FP8`. The local topology is `retrieval.local_model_count` independent vLLM servers, one per GPU. The default topology targets a 4 x A100 instance with four local model copies:
+The default retrieval model is `Qwen/Qwen3.6-35B-A3B-FP8`. The local topology is `retrieval.local_model_count` independent vLLM servers, one per GPU. The default topology targets a 2 x H100 instance with two local model copies:
 
 ```text
 GPU 0 -> http://127.0.0.1:8001/v1
 GPU 1 -> http://127.0.0.1:8002/v1
-GPU 2 -> http://127.0.0.1:8003/v1
-GPU 3 -> http://127.0.0.1:8004/v1
 ```
 
-For fewer GPUs, set `retrieval.local_model_count` to the available GPU count, provide the same number of endpoints, and reduce `retrieval.local_parallel_agents` to match. The deployment scripts read the model count and endpoints directly. For two GPUs:
+For a different GPU count, set `retrieval.local_model_count` to the available GPU count, provide the same number of endpoints, and set `retrieval.local_parallel_agents` to the desired fanout. The deployment scripts read the model count and endpoints directly. For one GPU:
 
 ```yaml
 retrieval:
-  local_model_count: 2
-  local_parallel_agents: 2
+  local_model_count: 1
+  local_parallel_agents: 1
   local_base_urls:
     - http://127.0.0.1:8001/v1
-    - http://127.0.0.1:8002/v1
 ```
 
 The app does not launch or supervise vLLM processes. It validates that `retrieval.local_model_count` matches `retrieval.local_base_urls`, then round-robins retrieval calls across those endpoints and fails over according to `http.retries`. With local retrieval, a single school can consume multiple endpoints concurrently because the retrieval fanout assumes local batching capacity and no provider rate limit.
@@ -318,6 +304,7 @@ The package layout is:
 ```text
 grad_agent/
   cli.py                 argparse CLI entry point
+  cli_support.py         CLI input loading and config override helpers
   config.py              YAML, .env, and environment config loading
   events.py              pipeline events consumed by the TUI
   llm/
@@ -325,7 +312,11 @@ grad_agent/
   models.py              Pydantic schemas
   tui.py                 Rich live terminal UI
   pipeline/
-    retrieval.py         Anthropic or local-vLLM retrieval agent loop
+    retrieval.py         Anthropic Haiku retrieval loop and backend dispatch
+    local_retrieval.py   local-vLLM JSON tool-command retrieval loops
+    gap_fill.py          targeted retrieval pass for insufficient profiles
+    tool_loop.py         shared tool command execution and tool events
+    confidence.py        judge-aware fit confidence calibration
     judge.py             Sonnet quality judge
     fit.py               Sonnet fit assessor
     runner.py            per-school orchestration
@@ -333,6 +324,7 @@ grad_agent/
     tools.py             Brave search and page fetch tools
   reporting/
     markdown.py          Markdown rendering
+    paths.py             filesystem-safe report path helpers
     pdf.py               PDF rendering from Markdown
     stats.py             token, cost, and timing stats
     trajectory.py        JSONL trajectory logging

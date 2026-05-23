@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from grad_agent import cli
 from grad_agent.config import Config
-from grad_agent.pipeline import fit, judge, retrieval
+from grad_agent.pipeline import fit, judge, retrieval, tool_loop
 from grad_agent.pipeline.prompts import (
     fit_user_prompt,
     judge_user_prompt,
@@ -331,7 +331,7 @@ class PipelineStageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(args, {"query": "Example MS CS"})
             return "1. Example result"
 
-        with patch.object(retrieval, "dispatch_tool", fake_dispatch):
+        with patch.object(tool_loop, "dispatch_tool", fake_dispatch):
             profile, stats = await retrieval.run_retrieval(
                 "Example University",
                 "MS CS",
@@ -383,7 +383,7 @@ class PipelineStageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(args, {"query": "Example MS CS deadline"})
             return "1. Example result"
 
-        with patch.object(retrieval, "dispatch_tool", fake_dispatch):
+        with patch.object(tool_loop, "dispatch_tool", fake_dispatch):
             profile, stats = await retrieval.run_retrieval(
                 "Example University",
                 "MS CS",
@@ -443,7 +443,7 @@ class PipelineStageTests(unittest.IsolatedAsyncioTestCase):
             calls.append((name, args))
             return "result"
 
-        with patch.object(retrieval, "dispatch_tool", fake_dispatch):
+        with patch.object(tool_loop, "dispatch_tool", fake_dispatch):
             profile, stats = await retrieval.run_retrieval(
                 "Example University",
                 "MS CS",

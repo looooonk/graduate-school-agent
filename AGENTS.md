@@ -61,6 +61,7 @@ Important behavior:
 ```text
 grad_agent/
   cli.py                 argparse CLI entry point
+  cli_support.py         CLI input loading and config override helpers
   config.py              YAML, .env, and environment config loading
   events.py              pipeline event dataclasses
   llm/
@@ -68,7 +69,11 @@ grad_agent/
   models.py              Pydantic schemas
   tui.py                 Rich live terminal UI
   pipeline/
-    retrieval.py         Anthropic or local-vLLM retrieval loop
+    retrieval.py         Anthropic Haiku retrieval loop and backend dispatch
+    local_retrieval.py   local-vLLM JSON tool-command retrieval loops
+    gap_fill.py          targeted retrieval pass for insufficient profiles
+    tool_loop.py         shared tool command execution and tool events
+    confidence.py        judge-aware fit confidence calibration
     judge.py             Sonnet quality judge
     fit.py               Sonnet CV-aware fit assessor
     runner.py            per-school orchestration and output writing
@@ -76,6 +81,7 @@ grad_agent/
     tools.py             Brave search and page fetch tool handlers
   reporting/
     markdown.py          report and summary rendering
+    paths.py             filesystem-safe report path helpers
     pdf.py               Markdown-to-PDF rendering and report directory helpers
     stats.py             token, cost, timing, and run statistics
     trajectory.py        per-school JSONL trajectory logger
@@ -287,7 +293,7 @@ Summary priority weights are:
 - medium confidence: `0.85`
 - low confidence: `0.65`
 
-`runner.calibrate_fit_confidence()` lowers fit confidence after judge results:
+`pipeline.confidence.calibrate_fit_confidence()` lowers fit confidence after judge results:
 
 - `insufficient` forces low confidence,
 - `partial` caps high confidence at medium.
@@ -342,9 +348,12 @@ When changing prompts, model schemas, output rendering, config behavior, or CLI 
 
 - Keep prompt text and local retrieval protocol text in `grad_agent/pipeline/prompts.py`; do not inline new stage prompts elsewhere.
 - Keep external tool schemas and handlers together in `grad_agent/pipeline/tools.py`.
+- Keep shared retrieval tool execution and `ToolCalled` event behavior in `grad_agent/pipeline/tool_loop.py`; retrieval backends should reuse it instead of dispatching tools directly.
+- Keep local vLLM JSON tool-command behavior in `grad_agent/pipeline/local_retrieval.py`; `retrieval.py` should remain the Anthropic loop and backend dispatcher.
+- Keep targeted insufficient-profile retrieval in `grad_agent/pipeline/gap_fill.py`.
 - Tool handlers should return strings suitable for LLM consumption, not structured Python objects.
 - Keep local vLLM endpoint calling in `grad_agent/llm/vllm.py`. Do not make the package responsible for launching vLLM processes.
 - Prefer `extract_json_object()` for parsing model JSON instead of duplicating parsing logic.
 - Use `SchoolProfile.model_validate`, `JudgeReport.model_validate`, and `FitAssessment.model_validate` at API boundaries.
 - Preserve partial-failure behavior in `run_school`: retrieval failure returns a stub result; judge, fit, and gap-fill errors are captured in stats instead of crashing the entire run.
-- Keep generated output paths filesystem-safe through `_safe_filename()`.
+- Keep generated output paths filesystem-safe through `reporting.paths.safe_filename()`.
