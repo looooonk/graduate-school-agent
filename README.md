@@ -5,6 +5,7 @@ An LLM research agent for graduate application planning. It gathers program info
 The default pipeline uses local Qwen retrieval through OpenAI-compatible vLLM endpoints, then Claude Sonnet for profile judging and fit assessment. Claude Haiku can be used as the retrieval backend when local vLLM is unavailable.
 
 ![Graduate School Agent TUI demo](resources/demo.gif)
+Demo run of the TUI.
 
 ## Features
 
