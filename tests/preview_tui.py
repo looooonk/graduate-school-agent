@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from grad_agent.tui import render_demo_snapshot, run_demo_tui
+from tests.tui_demo import render_demo_snapshot, run_demo_tui
 
 
 def main() -> None:
@@ -15,6 +15,17 @@ def main() -> None:
         help="Print one static text render instead of opening a live preview.",
     )
     parser.add_argument(
+        "--config",
+        default=None,
+        help="Config YAML to load. Defaults to ./config.yaml.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=7,
+        help="Seed for repeatable fake event ordering.",
+    )
+    parser.add_argument(
         "--width",
         type=int,
         default=120,
@@ -24,7 +35,7 @@ def main() -> None:
         "--frame-delay",
         type=float,
         default=0.35,
-        help="Seconds between fake live events.",
+        help="Average seconds between fake live events.",
     )
     parser.add_argument(
         "--hold",
@@ -35,9 +46,20 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.snapshot:
-        print(render_demo_snapshot(width=args.width))
+        print(
+            render_demo_snapshot(
+                config_path=args.config,
+                width=args.width,
+                seed=args.seed,
+            )
+        )
     else:
-        run_demo_tui(frame_delay=args.frame_delay, hold_seconds=args.hold)
+        run_demo_tui(
+            config_path=args.config,
+            seed=args.seed,
+            frame_delay=args.frame_delay,
+            hold_seconds=args.hold,
+        )
 
 
 if __name__ == "__main__":

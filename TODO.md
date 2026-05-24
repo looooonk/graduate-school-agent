@@ -1,7 +1,6 @@
 - Update TUI
     - Colored progress bar based on status of schools
     - Max viewing of 10 schools instead of every school
-    - Simulated TUI view based on current input file instead of pre-determined demo instances via induced latency, dummy values, etc.
 - Update prompting to de-centralize fit scoring using few-shot prompting and better system prompts
     - Incorporate usage of in-context learning
     - Allow LLM to give scores of 0 ~ 10 / 10 on multiple axis such as correctness, academic alignment, etc and then numerically compose

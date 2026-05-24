@@ -88,6 +88,8 @@ grad_agent/
     log.py               structured logging
     retry.py             Anthropic rate-limit retry helper
 tests/
+  preview_tui.py          no-token TUI preview CLI
+  tui_demo.py             config-driven fake TUI event simulation
 ```
 
 ## Configuration
@@ -218,6 +220,8 @@ Events are defined in `grad_agent/events.py`:
 
 The TUI replaces root log handlers while active and leaves the final Rich display visible.
 
+No-token TUI previews are driven from `tests/preview_tui.py` and `tests/tui_demo.py`, not from `grad_agent/tui.py`. The preview loads `Config`, reads `input.schools`, and simulates bounded school concurrency, random latency, retrieval turns, tool calls, judge/fit, and gap-fill events with seeded randomness. Keep hard-coded fake log message text and preview-only scheduling in `tests/tui_demo.py`; keep `grad_agent/tui.py` focused on rendering and consuming real `PipelineEvent` objects.
+
 ## Trajectory Logging
 
 `TrajectoryLogger` writes one JSONL file per school per run. Record types include stage boundaries, API responses, tool results, profiles, judge reports, and fit assessments.
@@ -236,6 +240,8 @@ micromamba run -n graduate-school-agent ruff check .
 The tests use fakes for Anthropic and HTTP behavior. Do not make tests depend on live network calls or real API keys.
 
 When changing prompts, model schemas, output rendering, config behavior, or CLI parsing, update or add focused regression tests in `tests/`.
+
+Use `python3 -m tests.preview_tui` or `python3 -m tests.preview_tui --snapshot` for TUI visual checks without API calls. The preview accepts `--config PATH` and `--seed N`; it should remain config-driven and should not duplicate school fixtures in production code.
 
 ## Development Notes
 

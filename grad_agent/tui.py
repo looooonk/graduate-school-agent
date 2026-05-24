@@ -8,14 +8,13 @@ Renders three stacked panels that refresh at ~4 fps:
 
 from __future__ import annotations
 
-import io
 import logging
 import time
 from collections import Counter, deque
 from dataclasses import dataclass, field
 from typing import Any
 
-from rich.console import Console, Group
+from rich.console import Group
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
@@ -29,41 +28,6 @@ from grad_agent.events import (
     StageStarted,
     ToolCalled,
     TurnProgress,
-)
-
-_DEMO_SCHOOLS: tuple[tuple[str, str], ...] = (
-    ("Stanford University", "MS Computer Science"),
-    ("MIT", "PhD Electrical Engineering and Computer Science"),
-    ("Carnegie Mellon University", "PhD Machine Learning"),
-    ("University of Washington", "MS Human Centered Design and Engineering"),
-)
-
-_DEMO_LOGS: tuple[tuple[str, str, str], ...] = (
-    (
-        "INFO",
-        "Stanford University - MS Computer Science",
-        "Fetched admissions requirements and application fee",
-    ),
-    (
-        "INFO",
-        "Stanford University - MS Computer Science",
-        "Judged profile as complete with high source confidence",
-    ),
-    (
-        "WARNING",
-        "MIT - PhD Electrical Engineering and Computer Science",
-        "Deadline looked stale; queued targeted gap-fill search",
-    ),
-    (
-        "INFO",
-        "Carnegie Mellon University - PhD Machine Learning",
-        "Fetched faculty directory and research group pages",
-    ),
-    (
-        "ERROR",
-        "University of Washington - MS Human Centered Design and Engineering",
-        "Transient fetch failure; retry will continue",
-    ),
 )
 
 _LEVEL_STYLES: dict[str, str] = {
@@ -361,142 +325,6 @@ def _format_tools(row: _SchoolRow) -> str:
         )
         pieces.append(names)
     return " | ".join(pieces)
-
-
-def demo_tui_events() -> tuple[PipelineEvent, ...]:
-    """Return fake pipeline events for a no-token TUI preview."""
-    labels = [f"{school} - {program}" for school, program in _DEMO_SCHOOLS]
-    return (
-        SchoolStarted(school=labels[0], idx=1, total=len(labels)),
-        StageStarted(school=labels[0], stage="retrieval"),
-        TurnProgress(school=labels[0], turn=8, max_turns=25, stage="retrieval", worker="full"),
-        TurnProgress(
-            school=labels[0], turn=7, max_turns=25, stage="retrieval", worker="admissions"
-        ),
-        TurnProgress(school=labels[0], turn=7, max_turns=25, stage="retrieval", worker="faculty"),
-        TurnProgress(
-            school=labels[0], turn=6, max_turns=25, stage="retrieval", worker="applicants"
-        ),
-        ToolCalled(
-            school=labels[0], tool_name="web_search", stage="retrieval",
-            worker="full", batch_size=4,
-        ),
-        ToolCalled(
-            school=labels[0], tool_name="fetch_page", stage="retrieval",
-            worker="admissions", batch_size=4,
-        ),
-        ToolCalled(
-            school=labels[0], tool_name="fetch_page", stage="retrieval",
-            worker="faculty", batch_size=4,
-        ),
-        StageStarted(school=labels[0], stage="judge+fit"),
-        SchoolDone(school=labels[0], success=True, elapsed=193.0, cost=0.0362),
-        SchoolStarted(school=labels[1], idx=2, total=len(labels)),
-        StageStarted(school=labels[1], stage="retrieval"),
-        TurnProgress(school=labels[1], turn=25, max_turns=25, stage="retrieval", worker="full"),
-        ToolCalled(
-            school=labels[1], tool_name="web_search", stage="retrieval",
-            worker="full", batch_size=2,
-        ),
-        ToolCalled(
-            school=labels[1], tool_name="fetch_page", stage="retrieval",
-            worker="full", batch_size=2,
-        ),
-        StageStarted(school=labels[1], stage="gap_fill"),
-        TurnProgress(school=labels[1], turn=3, max_turns=5, stage="gap_fill"),
-        SchoolStarted(school=labels[2], idx=3, total=len(labels)),
-        StageStarted(school=labels[2], stage="retrieval"),
-        TurnProgress(school=labels[2], turn=14, max_turns=25, stage="retrieval", worker="full"),
-        TurnProgress(
-            school=labels[2], turn=11, max_turns=25, stage="retrieval", worker="faculty"
-        ),
-        ToolCalled(
-            school=labels[2], tool_name="web_search", stage="retrieval",
-            worker="full", batch_size=3,
-        ),
-        ToolCalled(
-            school=labels[2], tool_name="fetch_page", stage="retrieval",
-            worker="full", batch_size=3,
-        ),
-        ToolCalled(
-            school=labels[2], tool_name="fetch_page", stage="retrieval",
-            worker="faculty", batch_size=3,
-        ),
-        ToolCalled(
-            school=labels[2], tool_name="fetch_page", stage="retrieval",
-            worker="faculty", batch_size=3,
-        ),
-        SchoolStarted(school=labels[3], idx=4, total=len(labels)),
-    )
-
-
-def build_demo_renderable() -> _Renderable:
-    """Build a filled TUI state for visual checks and snapshot tests."""
-    renderable = _Renderable(
-        total=len(_DEMO_SCHOOLS),
-        settings=TUIRunSettings(
-            retrieval_backend="local_qwen_vllm",
-            retrieval_model="Qwen/Qwen3.6-35B-A3B-FP8",
-            local_model_count=4,
-            local_parallel_agents=4,
-            local_max_parallel_tool_calls=8,
-            local_endpoint_count=4,
-            max_schools_parallel=8,
-            max_sonnet_parallel=8,
-        ),
-    )
-    for event in demo_tui_events():
-        renderable.on_event(event)
-
-    now = time.monotonic()
-    elapsed_by_label = {
-        f"{_DEMO_SCHOOLS[1][0]} - {_DEMO_SCHOOLS[1][1]}": 242.0,
-        f"{_DEMO_SCHOOLS[2][0]} - {_DEMO_SCHOOLS[2][1]}": 74.0,
-        f"{_DEMO_SCHOOLS[3][0]} - {_DEMO_SCHOOLS[3][1]}": 0.0,
-    }
-    for label, elapsed in elapsed_by_label.items():
-        if label in renderable.rows:
-            renderable.rows[label]._start = now - elapsed
-
-    renderable.log_buffer.extend(_DEMO_LOGS)
-    return renderable
-
-
-def render_demo_snapshot(width: int = 120) -> str:
-    """Render the fake TUI state as plain text for regression tests."""
-    console = Console(width=width, record=True, color_system=None, file=io.StringIO())
-    console.print(build_demo_renderable())
-    return console.export_text()
-
-
-def run_demo_tui(frame_delay: float = 0.35, hold_seconds: float = 5.0) -> None:
-    """Play fake events through the live TUI without API calls."""
-    tui = PipelineTUI(
-        total=len(_DEMO_SCHOOLS),
-        settings=TUIRunSettings(
-            retrieval_backend="local_qwen_vllm",
-            retrieval_model="Qwen/Qwen3.6-35B-A3B-FP8",
-            local_model_count=4,
-            local_parallel_agents=4,
-            local_max_parallel_tool_calls=8,
-            local_endpoint_count=4,
-            max_schools_parallel=8,
-            max_sonnet_parallel=8,
-        ),
-    )
-    tui.start()
-    try:
-        for idx, event in enumerate(demo_tui_events()):
-            tui.on_event(event)
-            if idx < len(_DEMO_LOGS):
-                tui._renderable.log_buffer.append(_DEMO_LOGS[idx])
-            time.sleep(frame_delay)
-        for log_record in _DEMO_LOGS[len(demo_tui_events()):]:
-            tui._renderable.log_buffer.append(log_record)
-            time.sleep(frame_delay)
-        time.sleep(hold_seconds)
-    finally:
-        tui.stop()
 
 
 class PipelineTUI:

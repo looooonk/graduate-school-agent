@@ -185,3 +185,5 @@ Preview the TUI without API calls:
 python3 -m tests.preview_tui
 python3 -m tests.preview_tui --snapshot
 ```
+
+The preview uses the school list from `input.schools` in `config.yaml`. Use `--config PATH` to preview another configuration and `--seed N` for repeatable simulated progress.
