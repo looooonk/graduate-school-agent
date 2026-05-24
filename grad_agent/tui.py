@@ -3,7 +3,7 @@
 Renders three stacked panels that refresh at ~4 fps:
   - header: overall progress bar, cost, elapsed, and run topology
   - school table: up to 8 currently running schools with stage, worker turns, tools, time
-  - log tail: the last 12 log records from the pipeline
+  - log tail: the last 12 log records with school, program, and message columns
 """
 
 from __future__ import annotations
@@ -149,7 +149,7 @@ class _TUILogHandler(logging.Handler):
     def __init__(self, buffer: deque[tuple[str, str, str]]) -> None:
         """
         Args:
-            buffer: Shared deque to append (levelname, school, message) tuples into.
+            buffer: Shared deque to append (levelname, school label, message) tuples into.
         """
         super().__init__()
         self._buffer = buffer
@@ -256,14 +256,29 @@ class _Renderable:
         return bar
 
     def _render_log(self) -> Panel:
-        txt = Text(overflow="fold")
         if not self.log_buffer:
+            txt = Text(overflow="fold")
             txt.append("Waiting for events…", style="dim")
-        else:
-            for level, school, msg in self.log_buffer:
-                txt.append(f"{school:<36}", style="dim")
-                txt.append(f" {msg}\n", style=_LEVEL_STYLES.get(level, ""))
-        return Panel(txt, title="Log", expand=True)
+            return Panel(txt, title="Log", expand=True)
+
+        tbl = Table(
+            expand=True,
+            show_header=False,
+            box=None,
+            padding=(0, 1),
+        )
+        tbl.add_column("School", ratio=3, overflow="ellipsis", no_wrap=True)
+        tbl.add_column("Program", ratio=2, overflow="ellipsis", no_wrap=True)
+        tbl.add_column("Actual Log", ratio=7, overflow="fold")
+
+        for level, label, msg in self.log_buffer:
+            school, program = _split_school_program(label)
+            tbl.add_row(
+                Text(school, style="dim"),
+                Text(program, style="dim"),
+                Text(msg, style=_LEVEL_STYLES.get(level, "")),
+            )
+        return Panel(tbl, title="Log", expand=True)
 
     def on_event(self, event: PipelineEvent) -> None:
         """Update internal row state in response to a pipeline event."""
@@ -307,6 +322,14 @@ class _Renderable:
 
 def _worker_key(worker: str) -> str:
     return worker or "main"
+
+
+def _split_school_program(label: str) -> tuple[str, str]:
+    for separator in (" — ", " - "):
+        school, sep, program = label.partition(separator)
+        if sep:
+            return school, program
+    return label, ""
 
 
 def _format_worker_turns(row: _SchoolRow) -> str:

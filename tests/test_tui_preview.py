@@ -10,7 +10,7 @@ from rich.console import Console
 
 from grad_agent.config import Config
 from grad_agent.events import SchoolDone, SchoolStarted, StageStarted
-from grad_agent.tui import _Renderable
+from grad_agent.tui import _Renderable, _split_school_program
 from tests.tui_demo import generate_demo_steps, load_configured_schools, render_demo_snapshot
 
 
@@ -27,7 +27,8 @@ class TuiPreviewTests(unittest.TestCase):
 
         self.assertIn("Graduate School Research Agent", snapshot)
         self.assertIn("Alpha University - MS Robotics", snapshot)
-        self.assertIn("Beta Institute - PhD Computer Science", snapshot)
+        self.assertIn("Beta Institute", snapshot)
+        self.assertIn("PhD Computer Scie", snapshot)
         self.assertIn("local 2 models, 2 agents/school, 4 tools/turn, 2 endpoints", snapshot)
         self.assertIn("parallel 3", snapshot)
         self.assertIn("schools, 4 Sonnet", snapshot)
@@ -107,6 +108,16 @@ class TuiPreviewTests(unittest.TestCase):
         self.assertIn("dim", styles)
         self.assertIn("█", bar.plain)
         self.assertIn("░", bar.plain)
+
+    def test_log_labels_split_into_school_and_program_columns(self) -> None:
+        self.assertEqual(
+            _split_school_program("Alpha University — MS Robotics"),
+            ("Alpha University", "MS Robotics"),
+        )
+        self.assertEqual(
+            _split_school_program("Beta Institute - PhD Computer Science"),
+            ("Beta Institute", "PhD Computer Science"),
+        )
 
     def _render(self, renderable: _Renderable) -> str:
         console = Console(width=120, record=True, color_system=None, file=io.StringIO())
