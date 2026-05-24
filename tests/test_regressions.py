@@ -162,6 +162,7 @@ class RetryTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(retry.anthropic, "RateLimitError", FakeRateLimitError),
             patch.object(retry.asyncio, "sleep", fake_sleep),
+            patch.object(retry.logger, "warning"),
         ):
             result = await retry.api_create_with_retry(fn, max_retries=3)
 
