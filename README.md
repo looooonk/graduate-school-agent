@@ -4,6 +4,8 @@ An LLM research agent for graduate application planning. It gathers program info
 
 The default pipeline uses local Qwen retrieval through OpenAI-compatible vLLM endpoints, then Claude Sonnet for profile judging and fit assessment. Claude Haiku can be used as the retrieval backend when local vLLM is unavailable.
 
+![Graduate School Agent TUI demo](resources/demo.gif)
+
 ## Features
 
 - Web retrieval with Brave Search and page fetching.
@@ -188,3 +190,5 @@ python3 -m tests.preview_tui --snapshot
 
 The preview uses the school list from `input.schools` in `config.yaml`. Use `--config PATH` to preview another configuration and `--seed N` for repeatable simulated progress.
 The live TUI colors the progress bar by school state, matching the table stage colors. Its compact table shows currently running schools only, keeps each school to one row, and caps visible school rows at 8 when concurrency is higher.
+
+Docs assets live in `resources/`. `resources/demo.tape` is the VHS script used to render `resources/demo.gif`.

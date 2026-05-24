@@ -90,6 +90,9 @@ grad_agent/
 tests/
   preview_tui.py          no-token TUI preview CLI
   tui_demo.py             config-driven fake TUI event simulation
+resources/
+  demo.tape               VHS script for the README TUI demo
+  demo.gif                rendered README TUI demo
 ```
 
 ## Configuration
