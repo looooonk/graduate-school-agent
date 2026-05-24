@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import io
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
+from rich.console import Console
+
 from grad_agent.config import Config
+from grad_agent.events import SchoolDone, SchoolStarted
+from grad_agent.tui import _Renderable
 from tests.tui_demo import generate_demo_steps, load_configured_schools, render_demo_snapshot
 
 
@@ -17,7 +22,7 @@ class TuiPreviewTests(unittest.TestCase):
             schools=schools,
             width=120,
             seed=3,
-            max_steps=80,
+            max_steps=12,
         )
 
         self.assertIn("Graduate School Research Agent", snapshot)
@@ -45,6 +50,37 @@ class TuiPreviewTests(unittest.TestCase):
         config, schools = self._make_preview_config()
 
         self.assertEqual(schools, load_configured_schools(config))
+
+    def test_renderable_removes_finished_schools_but_keeps_totals(self) -> None:
+        renderable = _Renderable(total=2)
+        renderable.on_event(SchoolStarted(school="Alpha - MS", idx=1, total=2))
+        renderable.on_event(SchoolStarted(school="Beta - PhD", idx=2, total=2))
+        renderable.on_event(SchoolDone(school="Alpha - MS", success=True, elapsed=12.0, cost=0.12))
+
+        snapshot = self._render(renderable)
+
+        self.assertIn("1 / 2 schools", snapshot)
+        self.assertIn("$0.1200", snapshot)
+        self.assertNotIn("Alpha - MS", snapshot)
+        self.assertIn("Beta - PhD", snapshot)
+
+    def test_renderable_limits_running_school_rows_to_eight(self) -> None:
+        renderable = _Renderable(total=10)
+        for idx in range(1, 11):
+            renderable.on_event(SchoolStarted(school=f"School {idx}", idx=idx, total=10))
+
+        snapshot = self._render(renderable)
+
+        for idx in range(1, 9):
+            self.assertIn(f"School {idx}", snapshot)
+        self.assertNotIn("School 9", snapshot)
+        self.assertNotIn("School 10", snapshot)
+        self.assertIn("Showing 8 of 10 running schools", snapshot)
+
+    def _render(self, renderable: _Renderable) -> str:
+        console = Console(width=120, record=True, color_system=None, file=io.StringIO())
+        console.print(renderable)
+        return console.export_text()
 
     def _make_preview_config(self) -> tuple[Config, list[tuple[str, str]]]:
         temp_dir = tempfile.TemporaryDirectory()

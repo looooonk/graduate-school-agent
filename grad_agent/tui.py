@@ -2,7 +2,7 @@
 
 Renders three stacked panels that refresh at ~4 fps:
   - header: overall progress bar, cost, elapsed, and run topology
-  - school table: one row per school with stage, worker turns, tools, time
+  - school table: up to 8 currently running schools with stage, worker turns, tools, time
   - log tail: the last 12 log records from the pipeline
 """
 
@@ -53,6 +53,8 @@ _WORKER_SHORT_LABELS: dict[str, str] = {
     "faculty":    "fac",
     "applicants": "app",
 }
+
+_MAX_VISIBLE_SCHOOLS = 8
 
 
 @dataclass(frozen=True)
@@ -164,6 +166,7 @@ class _Renderable:
         self.total = total
         self.settings = settings or TUIRunSettings()
         self.done_count = 0
+        self.total_cost = 0.0
         self.rows: dict[str, _SchoolRow] = {}
         self.log_buffer: deque[tuple[str, str, str]] = deque(maxlen=12)
         self._run_start = time.monotonic()
@@ -180,13 +183,12 @@ class _Renderable:
         bar_width = 34
         filled = int(bar_width * n / t) if t else 0
         bar = "█" * filled + "░" * (bar_width - filled)
-        total_cost = sum(r.cost for r in self.rows.values())
         elapsed = time.monotonic() - self._run_start
 
         txt = Text()
         txt.append(bar + "  ", style="green")
         txt.append(f"{n} / {t} schools", style="bold white")
-        txt.append(f"    ${total_cost:.4f}    {elapsed:.0f}s elapsed", style="dim")
+        txt.append(f"    ${self.total_cost:.4f}    {elapsed:.0f}s elapsed", style="dim")
         settings_summary = self.settings.summary()
         if settings_summary:
             txt.append("\n" + settings_summary, style="dim")
@@ -207,7 +209,8 @@ class _Renderable:
         tbl.add_column("Time",    justify="right", ratio=1)
         tbl.add_column("Cost",    justify="right", ratio=1)
 
-        for row in sorted(self.rows.values(), key=lambda r: r.idx):
+        rows = sorted(self.rows.values(), key=lambda r: r.idx)
+        for row in rows[:_MAX_VISIBLE_SCHOOLS]:
             style, stage_label = _STAGE_LABELS.get(row.stage, ("", row.stage))
             turn_str = _format_worker_turns(row)
             tool_str = _format_tools(row)
@@ -221,6 +224,9 @@ class _Renderable:
                 cost_str,
             )
 
+        hidden_count = len(rows) - _MAX_VISIBLE_SCHOOLS
+        if hidden_count > 0:
+            tbl.caption = f"Showing {_MAX_VISIBLE_SCHOOLS} of {len(rows)} running schools"
         return tbl
 
     def _render_log(self) -> Panel:
@@ -268,13 +274,8 @@ class _Renderable:
                 if event.stage:
                     progress.stage = event.stage
         elif isinstance(event, SchoolDone):
-            if event.school in self.rows:
-                r = self.rows[event.school]
-                r.done = True
-                r.success = event.success
-                r.stage = "done" if event.success else "failed"
-                r.elapsed = event.elapsed
-                r.cost = event.cost
+            self.total_cost += event.cost
+            self.rows.pop(event.school, None)
             self.done_count += 1
 
 

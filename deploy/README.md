@@ -53,11 +53,7 @@ deploy/healthcheck.sh
 Run the agent against local retrieval:
 
 ```bash
-~/.local/bin/micromamba run -n graduate-school-agent grad-agent \
-    --schools input/schools.json \
-    --cv input/cv.md \
-    --context input/context.md \
-    --retrieval-backend local_qwen_vllm
+~/.local/bin/micromamba run -n graduate-school-agent grad-agent
 ```
 
 Set `ANTHROPIC_API_KEY` and `BRAVE_API_KEY` in the shell or root `.env` before

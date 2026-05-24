@@ -218,7 +218,7 @@ Events are defined in `grad_agent/events.py`:
 - `ToolCalled` with optional stage, worker, and tool batch size
 - `SchoolDone`
 
-The TUI replaces root log handlers while active and leaves the final Rich display visible.
+The TUI replaces root log handlers while active and leaves the final Rich display visible. Its school table shows currently running schools only and caps visible school rows at 8 when more are running.
 
 No-token TUI previews are driven from `tests/preview_tui.py` and `tests/tui_demo.py`, not from `grad_agent/tui.py`. The preview loads `Config`, reads `input.schools`, and simulates bounded school concurrency, random latency, retrieval turns, tool calls, judge/fit, and gap-fill events with seeded randomness. Keep hard-coded fake log message text and preview-only scheduling in `tests/tui_demo.py`; keep `grad_agent/tui.py` focused on rendering and consuming real `PipelineEvent` objects.
 
