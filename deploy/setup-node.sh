@@ -58,5 +58,5 @@ Check endpoints:
   deploy/healthcheck.sh
 
 Run the agent after setting ANTHROPIC_API_KEY and BRAVE_API_KEY:
-  ${micromamba_bin} run -n ${DEPLOY_MICROMAMBA_ENV} grad-agent --schools input/schools.json --cv input/cv.md
+  ${micromamba_bin} run -n ${DEPLOY_MICROMAMBA_ENV} grad-agent
 EOF
