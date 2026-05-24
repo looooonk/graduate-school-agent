@@ -34,7 +34,7 @@ def main() -> None:
     parser.add_argument(
         "--frame-delay",
         type=float,
-        default=0.35,
+        default=0.06,
         help="Average seconds between fake live events.",
     )
     parser.add_argument(
