@@ -1,4 +1,3 @@
-- Remove feature to generate summary from path via `--summary-from PATH`
 - Update TUI
     - Colored progress bar based on status of schools
     - Max viewing of 10 schools instead of every school

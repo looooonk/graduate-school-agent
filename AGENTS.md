@@ -159,7 +159,6 @@ Useful flags:
 - `--max-parallel N`: override max concurrent school pipelines.
 - `--retrieval-backend {anthropic_haiku,local_qwen_vllm}`: override retrieval backend.
 - `--no-gap-fill`: disable insufficient-profile gap-fill.
-- `--summary-from PATH`: rebuild summary reports from existing profile Markdown.
 - `--verbose`: disable the TUI and enable debug logs.
 
 Configured `input.context: input/context.md` is skipped if missing. Any other configured or CLI-specified context path must exist.

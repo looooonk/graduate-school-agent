@@ -98,7 +98,6 @@ Common commands:
 grad-agent
 grad-agent --schools input/schools.json --cv input/cv.md
 grad-agent --school "School Name" --program "Program Name" --cv input/cv.md
-grad-agent --summary-from output/markdown
 ```
 
 Useful flags:
@@ -110,7 +109,6 @@ Useful flags:
 - `--max-parallel N`: override max concurrent school pipelines.
 - `--retrieval-backend {anthropic_haiku,local_qwen_vllm}`: choose retrieval backend.
 - `--no-gap-fill`: disable targeted gap-fill.
-- `--summary-from PATH`: rebuild summary reports from existing profile Markdown without model calls.
 - `--verbose`: bypass the Rich TUI and print debug logs.
 
 ## Outputs
