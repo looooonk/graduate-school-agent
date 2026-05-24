@@ -77,6 +77,19 @@ class TuiPreviewTests(unittest.TestCase):
         self.assertNotIn("School 10", snapshot)
         self.assertIn("Showing 8 of 10 running schools", snapshot)
 
+    def test_renderable_keeps_log_panel_at_fixed_row(self) -> None:
+        one_school = _Renderable(total=8)
+        one_school.on_event(SchoolStarted(school="School 1", idx=1, total=8))
+
+        eight_schools = _Renderable(total=8)
+        for idx in range(1, 9):
+            eight_schools.on_event(SchoolStarted(school=f"School {idx}", idx=idx, total=8))
+
+        self.assertEqual(
+            self._log_panel_line(self._render(one_school)),
+            self._log_panel_line(self._render(eight_schools)),
+        )
+
     def test_progress_bar_uses_stage_colors(self) -> None:
         renderable = _Renderable(total=4)
         renderable.on_event(SchoolStarted(school="Alpha - MS", idx=1, total=4))
@@ -99,6 +112,12 @@ class TuiPreviewTests(unittest.TestCase):
         console = Console(width=120, record=True, color_system=None, file=io.StringIO())
         console.print(renderable)
         return console.export_text()
+
+    def _log_panel_line(self, snapshot: str) -> int:
+        for idx, line in enumerate(snapshot.splitlines()):
+            if " Log " in line:
+                return idx
+        raise AssertionError("log panel not found")
 
     def _make_preview_config(self) -> tuple[Config, list[tuple[str, str]]]:
         temp_dir = tempfile.TemporaryDirectory()

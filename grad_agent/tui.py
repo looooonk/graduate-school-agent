@@ -215,7 +215,8 @@ class _Renderable:
         tbl.add_column("Cost",    justify="right", ratio=1)
 
         rows = sorted(self.rows.values(), key=lambda r: r.idx)
-        for row in rows[:_MAX_VISIBLE_SCHOOLS]:
+        visible_rows = rows[:_MAX_VISIBLE_SCHOOLS]
+        for row in visible_rows:
             style, stage_label = _STAGE_LABELS.get(row.stage, ("", row.stage))
             turn_str = _format_worker_turns(row)
             tool_str = _format_tools(row)
@@ -229,9 +230,14 @@ class _Renderable:
                 cost_str,
             )
 
+        for _ in range(_MAX_VISIBLE_SCHOOLS - len(visible_rows)):
+            tbl.add_row("", "", "", "", "", "")
+
         hidden_count = len(rows) - _MAX_VISIBLE_SCHOOLS
         if hidden_count > 0:
             tbl.caption = f"Showing {_MAX_VISIBLE_SCHOOLS} of {len(rows)} running schools"
+        else:
+            tbl.caption = " "
         return tbl
 
     def _render_progress_bar(self, width: int) -> Text:
