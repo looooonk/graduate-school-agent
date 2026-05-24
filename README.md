@@ -10,7 +10,7 @@ Demo run of the TUI.
 ## Features
 
 - Web retrieval with Brave Search and page fetching.
-- Local Qwen/vLLM retrieval with parallel agents and batched tool calls.
+- Local vLLM retrieval with parallel agents and batched tool calls.
 - Optional Anthropic Haiku retrieval backend.
 - Sonnet quality judging for missing, stale, contradictory, or weakly sourced fields.
 - Sonnet CV-aware fit assessment.
@@ -72,7 +72,7 @@ Run one school without editing `input/schools.json`:
 grad-agent --school "MIT" --program "PhD Electrical Engineering and Computer Science" --cv input/cv.md
 ```
 
-Use Anthropic Haiku for retrieval instead of local Qwen:
+Use Anthropic Haiku for retrieval instead of local LLM:
 
 ```bash
 grad-agent --retrieval-backend anthropic_haiku
