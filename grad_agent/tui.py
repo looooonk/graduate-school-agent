@@ -9,6 +9,7 @@ Renders three stacked panels that refresh at ~4 fps:
 from __future__ import annotations
 
 import logging
+import math
 import time
 from collections import Counter, deque
 from dataclasses import dataclass, field
@@ -40,7 +41,7 @@ _LEVEL_STYLES: dict[str, str] = {
 
 _STAGE_LABELS: dict[str, tuple[str, str]] = {
     "queued":    ("dim",      "queued"),
-    "retrieval": ("cyan",     "retrieval"),
+    "retrieval": ("blue",     "retrieval"),
     "judge+fit": ("yellow",   "judge + fit"),
     "gap_fill":  ("magenta",  "gap-fill"),
     "done":      ("green",    "done ✓"),
@@ -54,7 +55,13 @@ _WORKER_SHORT_LABELS: dict[str, str] = {
     "applicants": "app",
 }
 
+_TOOL_SHORT_LABELS: dict[str, str] = {
+    "fetch_page": "fetch",
+    "web_search": "search",
+}
+
 _MAX_VISIBLE_SCHOOLS = 8
+_PROGRESS_STAGE_ORDER = ("done", "retrieval", "judge+fit", "gap_fill", "failed", "queued")
 
 
 @dataclass(frozen=True)
@@ -180,13 +187,11 @@ class _Renderable:
 
     def _render_header(self) -> Panel:
         n, t = self.done_count, self.total
-        bar_width = 34
-        filled = int(bar_width * n / t) if t else 0
-        bar = "█" * filled + "░" * (bar_width - filled)
         elapsed = time.monotonic() - self._run_start
 
         txt = Text()
-        txt.append(bar + "  ", style="green")
+        txt.append_text(self._render_progress_bar(width=34))
+        txt.append("  ")
         txt.append(f"{n} / {t} schools", style="bold white")
         txt.append(f"    ${self.total_cost:.4f}    {elapsed:.0f}s elapsed", style="dim")
         settings_summary = self.settings.summary()
@@ -203,9 +208,9 @@ class _Renderable:
             padding=(0, 1),
         )
         tbl.add_column("School",  ratio=5, overflow="ellipsis", no_wrap=True)
-        tbl.add_column("Stage",   ratio=2)
-        tbl.add_column("Turns",   ratio=3, overflow="fold")
-        tbl.add_column("Tools",   ratio=2, overflow="ellipsis")
+        tbl.add_column("Stage",   ratio=2, overflow="ellipsis", no_wrap=True)
+        tbl.add_column("Turns",   ratio=4, overflow="ellipsis", no_wrap=True)
+        tbl.add_column("Tools",   ratio=4, overflow="ellipsis", no_wrap=True)
         tbl.add_column("Time",    justify="right", ratio=1)
         tbl.add_column("Cost",    justify="right", ratio=1)
 
@@ -228,6 +233,21 @@ class _Renderable:
         if hidden_count > 0:
             tbl.caption = f"Showing {_MAX_VISIBLE_SCHOOLS} of {len(rows)} running schools"
         return tbl
+
+    def _render_progress_bar(self, width: int) -> Text:
+        active_counts = Counter(row.stage for row in self.rows.values())
+        counts: dict[str, int] = {"done": self.done_count}
+        counts.update(active_counts)
+        queued = max(0, self.total - sum(counts.values()))
+        if queued:
+            counts["queued"] = queued
+
+        bar = Text()
+        for stage, chunk_width in _progress_widths(counts, self.total, width):
+            style = _STAGE_LABELS.get(stage, ("dim", stage))[0]
+            char = "░" if stage == "queued" else "█"
+            bar.append(char * chunk_width, style=style)
+        return bar
 
     def _render_log(self) -> Panel:
         txt = Text(overflow="fold")
@@ -318,14 +338,34 @@ def _format_tools(row: _SchoolRow) -> str:
         return "—"
     pieces = [str(row.tool_calls)]
     if row.max_tool_batch > 1:
-        pieces.append(f"batch {row.max_tool_batch}")
+        pieces.append(f"b{row.max_tool_batch}")
     if row.tool_names:
         names = ", ".join(
-            f"{name.replace('_', ' ')} {count}"
+            f"{_TOOL_SHORT_LABELS.get(name, name.replace('_', ' '))} {count}"
             for name, count in row.tool_names.most_common(2)
         )
         pieces.append(names)
-    return " | ".join(pieces)
+    return " ".join(pieces)
+
+
+def _progress_widths(counts: dict[str, int], total: int, width: int) -> list[tuple[str, int]]:
+    if total <= 0 or width <= 0:
+        return [("queued", max(0, width))]
+
+    stages = [stage for stage in _PROGRESS_STAGE_ORDER if counts.get(stage, 0) > 0]
+    stages.extend(stage for stage, count in counts.items() if count > 0 and stage not in stages)
+    scale_total = max(total, sum(counts.values()))
+    raw_widths = [(stage, counts[stage] * width / scale_total) for stage in stages]
+    widths = {stage: math.floor(raw) for stage, raw in raw_widths}
+    remaining = width - sum(widths.values())
+
+    for stage, _ in sorted(raw_widths, key=lambda item: item[1] % 1, reverse=True):
+        if remaining <= 0:
+            break
+        widths[stage] += 1
+        remaining -= 1
+
+    return [(stage, chunk_width) for stage in stages if (chunk_width := widths[stage]) > 0]
 
 
 class PipelineTUI:

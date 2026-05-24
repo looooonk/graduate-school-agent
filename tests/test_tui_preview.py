@@ -9,7 +9,7 @@ from pathlib import Path
 from rich.console import Console
 
 from grad_agent.config import Config
-from grad_agent.events import SchoolDone, SchoolStarted
+from grad_agent.events import SchoolDone, SchoolStarted, StageStarted
 from grad_agent.tui import _Renderable
 from tests.tui_demo import generate_demo_steps, load_configured_schools, render_demo_snapshot
 
@@ -32,7 +32,7 @@ class TuiPreviewTests(unittest.TestCase):
         self.assertIn("parallel 3", snapshot)
         self.assertIn("schools, 4 Sonnet", snapshot)
         self.assertIn("full", snapshot)
-        self.assertIn("batch", snapshot)
+        self.assertIn("b", snapshot)
         self.assertIn("gap-fill", snapshot)
         self.assertIn("Fetched faculty directory and research group pages", snapshot)
 
@@ -76,6 +76,24 @@ class TuiPreviewTests(unittest.TestCase):
         self.assertNotIn("School 9", snapshot)
         self.assertNotIn("School 10", snapshot)
         self.assertIn("Showing 8 of 10 running schools", snapshot)
+
+    def test_progress_bar_uses_stage_colors(self) -> None:
+        renderable = _Renderable(total=4)
+        renderable.on_event(SchoolStarted(school="Alpha - MS", idx=1, total=4))
+        renderable.on_event(StageStarted(school="Alpha - MS", stage="retrieval"))
+        renderable.on_event(SchoolStarted(school="Beta - PhD", idx=2, total=4))
+        renderable.on_event(StageStarted(school="Beta - PhD", stage="gap_fill"))
+        renderable.on_event(SchoolDone(school="Gamma - MS", success=True, elapsed=1.0, cost=0.01))
+
+        bar = renderable._render_progress_bar(width=8)
+        styles = [span.style for span in bar.spans]
+
+        self.assertIn("green", styles)
+        self.assertIn("blue", styles)
+        self.assertIn("magenta", styles)
+        self.assertIn("dim", styles)
+        self.assertIn("█", bar.plain)
+        self.assertIn("░", bar.plain)
 
     def _render(self, renderable: _Renderable) -> str:
         console = Console(width=120, record=True, color_system=None, file=io.StringIO())

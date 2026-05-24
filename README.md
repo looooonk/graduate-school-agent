@@ -187,4 +187,4 @@ python3 -m tests.preview_tui --snapshot
 ```
 
 The preview uses the school list from `input.schools` in `config.yaml`. Use `--config PATH` to preview another configuration and `--seed N` for repeatable simulated progress.
-The live TUI table shows currently running schools only, capped at 8 visible school rows when concurrency is higher.
+The live TUI colors the progress bar by school state, matching the table stage colors. Its compact table shows currently running schools only, keeps each school to one row, and caps visible school rows at 8 when concurrency is higher.
