@@ -140,12 +140,22 @@ def main() -> None:
             print(f"Config error: {e}", file=sys.stderr)
         sys.exit(1)
 
+    retrieval_topology = (
+        f", local_models={config.local_retrieval_model_count}, "
+        f"local_agents={config.local_retrieval_parallel_agents}"
+        if config.uses_local_retrieval
+        else ""
+    )
     log.info(
-        "Configuration: retrieval=%s/%s, local_models=%d, local_agents=%d, "
-        "sonnet=%s, max_turns=%d, schools_parallel=%d, sonnet_parallel=%d",
-        config.retrieval_backend, config.retrieval_model, config.local_retrieval_model_count,
-        config.local_retrieval_parallel_agents, config.sonnet_model,
-        config.max_retrieval_turns, config.max_schools_parallel, config.max_sonnet_parallel,
+        "Configuration: retrieval=%s/%s%s, sonnet=%s, max_turns=%d, "
+        "schools_parallel=%d, sonnet_parallel=%d",
+        config.retrieval_backend,
+        config.retrieval_model,
+        retrieval_topology,
+        config.sonnet_model,
+        config.max_retrieval_turns,
+        config.max_schools_parallel,
+        config.max_sonnet_parallel,
     )
 
     tui = None

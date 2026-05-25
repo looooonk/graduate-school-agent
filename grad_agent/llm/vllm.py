@@ -1,4 +1,4 @@
-"""OpenAI-compatible chat client for local retrieval workers."""
+"""OpenAI-compatible chat client for retrieval workers."""
 
 from __future__ import annotations
 
@@ -26,8 +26,8 @@ class LocalChatResponse:
         return [SimpleNamespace(type="text", text=self.text)]
 
 
-class OpenAICompatibleLocalClient:
-    """Round-robin client for one or more OpenAI-compatible local endpoints."""
+class OpenAICompatibleChatClient:
+    """Round-robin client for one or more OpenAI-compatible chat endpoints."""
 
     def __init__(
         self,
@@ -38,7 +38,7 @@ class OpenAICompatibleLocalClient:
         retries: int = 0,
     ) -> None:
         if not base_urls:
-            raise ValueError("At least one local retrieval endpoint is required")
+            raise ValueError("At least one retrieval endpoint is required")
         self._base_urls = tuple(url.rstrip("/") for url in base_urls)
         self._api_key = api_key
         self._timeout = timeout
@@ -47,13 +47,26 @@ class OpenAICompatibleLocalClient:
         self._lock = asyncio.Lock()
 
     @classmethod
-    def from_config(cls, config: Config) -> OpenAICompatibleLocalClient:
+    def from_local_config(cls, config: Config) -> OpenAICompatibleChatClient:
         return cls(
             config.local_retrieval_endpoints,
             api_key=config.local_retrieval_api_key,
             timeout=config.local_retrieval_timeout,
             retries=config.http_retries,
         )
+
+    @classmethod
+    def from_api_config(cls, config: Config) -> OpenAICompatibleChatClient:
+        return cls(
+            config.openai_retrieval_base_urls,
+            api_key=config.openai_retrieval_api_key,
+            timeout=config.openai_retrieval_timeout,
+            retries=config.http_retries,
+        )
+
+    @classmethod
+    def from_config(cls, config: Config) -> OpenAICompatibleChatClient:
+        return cls.from_local_config(config)
 
     async def create(
         self,
@@ -83,7 +96,7 @@ class OpenAICompatibleLocalClient:
                 return _parse_response(data, endpoint)
             except (httpx.HTTPError, ValueError, KeyError, IndexError) as exc:
                 last_exc = exc
-        raise RuntimeError(f"All local retrieval endpoints failed: {last_exc}") from last_exc
+        raise RuntimeError(f"All retrieval endpoints failed: {last_exc}") from last_exc
 
     async def _next_endpoint(self) -> str:
         async with self._lock:
@@ -132,4 +145,5 @@ def _parse_response(data: dict[str, Any], endpoint: str) -> LocalChatResponse:
     )
 
 
-LocalVLLMClient = OpenAICompatibleLocalClient
+OpenAICompatibleLocalClient = OpenAICompatibleChatClient
+LocalVLLMClient = OpenAICompatibleChatClient

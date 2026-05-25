@@ -39,6 +39,10 @@ def _test_config(**overrides: object) -> Config:
         "local_retrieval_base_urls": ("http://127.0.0.1:8001/v1",),
         "local_retrieval_api_key": "",
         "local_retrieval_timeout": 30,
+        "openai_retrieval_model": "openai-test",
+        "openai_retrieval_base_urls": ("https://api.openai.test/v1",),
+        "openai_retrieval_api_key": "openai-key",
+        "openai_retrieval_timeout": 30,
         "max_retrieval_turns": 2,
         "max_search_results": 3,
         "max_page_chars": 20,
@@ -464,6 +468,61 @@ class PipelineStageTests(unittest.IsolatedAsyncioTestCase):
                 ("web_search", {"query": "Example MS CS faculty"}),
             ],
         )
+
+    async def test_run_retrieval_uses_openai_compatible_api_backend(self) -> None:
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "school_name": "Wrong",
+                                        "program_name": "Wrong",
+                                        "deadline": "January 15",
+                                        "sources": ["https://example.edu"],
+                                    }
+                                )
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 9, "completion_tokens": 4},
+                }
+
+        class FakeHttp:
+            def __init__(self) -> None:
+                self.url = ""
+                self.kwargs: dict[str, object] = {}
+
+            async def post(self, url: str, **kwargs: object) -> FakeResponse:
+                self.url = url
+                self.kwargs = kwargs
+                return FakeResponse()
+
+        http = FakeHttp()
+
+        profile, stats = await retrieval.run_retrieval(
+            "Example University",
+            "MS CS",
+            _test_config(retrieval_backend="openai_compatible"),
+            FakeClient([]),
+            http,
+        )
+
+        self.assertEqual(profile.school_name, "Example University")
+        self.assertEqual(profile.deadline, "January 15")
+        self.assertEqual(stats.model, "openai-test")
+        self.assertEqual(stats.api_calls, 1)
+        self.assertEqual(stats.input_tokens, 9)
+        self.assertEqual(stats.output_tokens, 4)
+        self.assertEqual(http.url, "https://api.openai.test/v1/chat/completions")
+        self.assertEqual(http.kwargs["headers"]["Authorization"], "Bearer openai-key")
+        self.assertEqual(http.kwargs["json"]["model"], "openai-test")
 
 
 class CliTests(unittest.TestCase):

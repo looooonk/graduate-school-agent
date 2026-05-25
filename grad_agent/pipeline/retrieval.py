@@ -45,6 +45,6 @@ async def run_retrieval(
             http=http,
             on_event=on_event,
             traj=traj,
-            local_client=local_client,
+            openai_compatible_client=local_client,
         )
     )

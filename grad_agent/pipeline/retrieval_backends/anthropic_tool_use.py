@@ -1,74 +1,19 @@
-"""Concrete retrieval backend implementations."""
+"""Anthropic retrieval backend using native tool-use blocks."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any
 
-import anthropic
-import httpx
-
-from grad_agent.config import Config
-from grad_agent.events import EventCallback, TurnProgress
-from grad_agent.llm.vllm import LocalVLLMClient
+from grad_agent.events import TurnProgress
 from grad_agent.models import SchoolProfile
-from grad_agent.pipeline.local_retrieval import (
-    run_local_parallel_profile_loop,
-    run_local_profile_loop,
-)
 from grad_agent.pipeline.prompts import RETRIEVAL_SYSTEM, retrieval_turn_status
+from grad_agent.pipeline.retrieval_backends.base import RetrievalRequest
 from grad_agent.pipeline.tool_loop import ToolCommand, run_tool_commands
 from grad_agent.pipeline.tools import TOOL_DEFINITIONS
 from grad_agent.reporting.stats import StageStats, add_usage, timed
-from grad_agent.reporting.trajectory import TrajectoryLogger
-from grad_agent.retrieval_registry import RETRIEVAL_BACKENDS
 from grad_agent.util.json import extract_json_object
 from grad_agent.util.log import get_school_logger
 from grad_agent.util.retry import api_create_with_retry
-
-
-@dataclass(frozen=True)
-class RetrievalRequest:
-    school_name: str
-    program_name: str
-    initial_prompt: str
-    stage: str
-    max_turns: int
-    config: Config
-    anthropic_client: anthropic.AsyncAnthropic
-    http: httpx.AsyncClient
-    on_event: EventCallback | None = None
-    traj: TrajectoryLogger | None = None
-    local_client: LocalVLLMClient | None = None
-    fallback_profile: SchoolProfile | None = None
-
-    @property
-    def school_label(self) -> str:
-        return f"{self.school_name} — {self.program_name}"
-
-
-class RetrievalBackend(Protocol):
-    async def run(self, request: RetrievalRequest) -> tuple[SchoolProfile, StageStats]:
-        ...
-
-
-class LocalOpenAICompatibleBackend:
-    async def run(self, request: RetrievalRequest) -> tuple[SchoolProfile, StageStats]:
-        kwargs = {
-            "school_name": request.school_name,
-            "program_name": request.program_name,
-            "config": request.config,
-            "http": request.http,
-            "initial_prompt": request.initial_prompt,
-            "stage": request.stage,
-            "max_turns": request.max_turns,
-            "on_event": request.on_event,
-            "traj": request.traj,
-            "local_client": request.local_client,
-        }
-        if request.config.local_retrieval_parallel_agents > 1:
-            return await run_local_parallel_profile_loop(**kwargs)
-        return await run_local_profile_loop(**kwargs)
 
 
 class AnthropicToolUseBackend:
@@ -218,22 +163,6 @@ class AnthropicToolUseBackend:
                 "a complete profile."
             ),
         ), stats
-
-
-_BACKEND_IMPLEMENTATIONS: dict[str, RetrievalBackend] = {
-    "local_qwen_vllm": LocalOpenAICompatibleBackend(),
-    "anthropic_haiku": AnthropicToolUseBackend(),
-}
-
-
-def get_retrieval_backend(backend_id: str) -> RetrievalBackend:
-    try:
-        return _BACKEND_IMPLEMENTATIONS[backend_id]
-    except KeyError as exc:
-        allowed = ", ".join(sorted(RETRIEVAL_BACKENDS))
-        raise ValueError(
-            f"Unsupported retrieval backend {backend_id!r}. Expected one of: {allowed}"
-        ) from exc
 
 
 def _anthropic_tool_commands(blocks: list[Any]) -> tuple[list[dict[str, Any]], list[ToolCommand]]:

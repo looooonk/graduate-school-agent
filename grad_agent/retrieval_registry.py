@@ -5,7 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-RetrievalBackendKind = Literal["api_tool_use", "local_openai_compatible"]
+RetrievalBackendKind = Literal[
+    "anthropic_tool_use",
+    "local_openai_compatible",
+    "openai_compatible_api",
+]
 
 
 @dataclass(frozen=True)
@@ -20,6 +24,10 @@ class RetrievalBackendSpec:
     def is_local(self) -> bool:
         return self.kind == "local_openai_compatible"
 
+    @property
+    def is_openai_compatible_api(self) -> bool:
+        return self.kind == "openai_compatible_api"
+
 
 RETRIEVAL_BACKENDS: dict[str, RetrievalBackendSpec] = {
     "local_qwen_vllm": RetrievalBackendSpec(
@@ -29,11 +37,32 @@ RETRIEVAL_BACKENDS: dict[str, RetrievalBackendSpec] = {
         model_field="local_retrieval_model",
         description="Local OpenAI-compatible endpoint using JSON tool commands.",
     ),
+    "local_openai_compatible": RetrievalBackendSpec(
+        id="local_openai_compatible",
+        label="Local OpenAI-compatible",
+        kind="local_openai_compatible",
+        model_field="local_retrieval_model",
+        description="Generic local OpenAI-compatible endpoint using JSON tool commands.",
+    ),
+    "openai_compatible": RetrievalBackendSpec(
+        id="openai_compatible",
+        label="OpenAI-compatible API",
+        kind="openai_compatible_api",
+        model_field="openai_retrieval_model",
+        description="Remote OpenAI-compatible chat completions using JSON tool commands.",
+    ),
     "anthropic_haiku": RetrievalBackendSpec(
         id="anthropic_haiku",
         label="Anthropic Haiku",
-        kind="api_tool_use",
+        kind="anthropic_tool_use",
         model_field="haiku_model",
+        description="Anthropic Messages API endpoint using native tool calls.",
+    ),
+    "anthropic_sonnet": RetrievalBackendSpec(
+        id="anthropic_sonnet",
+        label="Anthropic Sonnet",
+        kind="anthropic_tool_use",
+        model_field="sonnet_model",
         description="Anthropic Messages API endpoint using native tool calls.",
     ),
 }

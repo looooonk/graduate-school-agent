@@ -2,6 +2,7 @@ models:
   haiku: claude-haiku-4-5-20251001
   sonnet: claude-sonnet-4-6
   local_retrieval: Qwen/Qwen3.6-35B-A3B-FP8
+  openai_retrieval: gpt-4.1-mini
 
 input:
   cv: input/cv.md
@@ -20,6 +21,9 @@ retrieval:
     - http://127.0.0.1:8001/v1
     - http://127.0.0.1:8002/v1
   local_timeout: 600
+  openai_base_urls:
+    - https://api.openai.com/v1
+  openai_timeout: 120
 
 judge:
   retry_gap_fill: true

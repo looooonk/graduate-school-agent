@@ -23,6 +23,7 @@ _DEFAULT_LOCAL_RETRIEVAL_BASE_URLS = (
     "http://127.0.0.1:8001/v1",
     "http://127.0.0.1:8002/v1",
 )
+_DEFAULT_OPENAI_RETRIEVAL_BASE_URLS = ("https://api.openai.com/v1",)
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,12 @@ class Config:
     output_dir: str
     logs_dir: str  # set to "" to disable trajectory logging
 
+    # --- Optional OpenAI-compatible API retrieval ---
+    openai_retrieval_model: str = "gpt-4.1-mini"
+    openai_retrieval_base_urls: tuple[str, ...] = _DEFAULT_OPENAI_RETRIEVAL_BASE_URLS
+    openai_retrieval_api_key: str = ""
+    openai_retrieval_timeout: int = 120
+
     @classmethod
     def load(
         cls,
@@ -101,6 +108,12 @@ class Config:
             "local_retrieval_model_count",
             _get(raw, "retrieval.local_model_count", len(local_retrieval_base_urls)),
         )
+        openai_retrieval_base_urls = _as_tuple(
+            ov.get(
+                "openai_retrieval_base_urls",
+                _get(raw, "retrieval.openai_base_urls", _DEFAULT_OPENAI_RETRIEVAL_BASE_URLS),
+            )
+        )
 
         return cls(
             anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
@@ -112,6 +125,10 @@ class Config:
             local_retrieval_model=ov.get(
                 "local_retrieval_model",
                 _get(raw, "models.local_retrieval", "Qwen/Qwen3.6-35B-A3B-FP8"),
+            ),
+            openai_retrieval_model=ov.get(
+                "openai_retrieval_model",
+                _get(raw, "models.openai_retrieval", "gpt-4.1-mini"),
             ),
             retrieval_backend=ov.get(
                 "retrieval_backend",
@@ -125,6 +142,21 @@ class Config:
             ),
             local_retrieval_timeout=ov.get(
                 "local_retrieval_timeout", _get(raw, "retrieval.local_timeout", 600)
+            ),
+            openai_retrieval_base_urls=openai_retrieval_base_urls,
+            openai_retrieval_api_key=ov.get(
+                "openai_retrieval_api_key",
+                os.environ.get(
+                    "OPENAI_COMPATIBLE_API_KEY",
+                    os.environ.get(
+                        "OPENAI_API_KEY",
+                        _get(raw, "retrieval.openai_api_key", ""),
+                    ),
+                ),
+            ),
+            openai_retrieval_timeout=ov.get(
+                "openai_retrieval_timeout",
+                _get(raw, "retrieval.openai_timeout", 120),
             ),
             max_retrieval_turns=ov.get("max_retrieval_turns", _get(raw, "retrieval.max_turns", 15)),
             max_search_results=ov.get(
@@ -199,6 +231,21 @@ class Config:
             )
             errors.extend(
                 _validate_positive_int("retrieval.local_timeout", self.local_retrieval_timeout)
+            )
+        if backend_spec and backend_spec.is_openai_compatible_api:
+            if not isinstance(self.openai_retrieval_model, str) or (
+                not self.openai_retrieval_model.strip()
+            ):
+                errors.append("models.openai_retrieval must be set")
+            if not self.openai_retrieval_base_urls:
+                errors.append("retrieval.openai_base_urls must include at least one endpoint")
+            if not self.openai_retrieval_api_key:
+                errors.append(
+                    "OPENAI_API_KEY or OPENAI_COMPATIBLE_API_KEY is required "
+                    "for retrieval.backend=openai_compatible"
+                )
+            errors.extend(
+                _validate_positive_int("retrieval.openai_timeout", self.openai_retrieval_timeout)
             )
         errors.extend(_validate_positive_int("retrieval.max_turns", self.max_retrieval_turns))
         errors.extend(

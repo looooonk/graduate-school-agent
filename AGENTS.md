@@ -44,10 +44,12 @@ Do not run the full `grad-agent` program for routine validation because it can s
 ## Architecture Notes
 
 - Retrieval is dispatched through a modular backend registry. `retrieval.backend` names an implementation, not a one-off conditional path.
-- The currently supported retrieval implementations are `local_qwen_vllm` and `anthropic_haiku`.
+- The currently supported retrieval implementations are `local_qwen_vllm`, `local_openai_compatible`, `openai_compatible`, `anthropic_haiku`, and `anthropic_sonnet`.
 - `local_qwen_vllm` uses local OpenAI-compatible chat completions, currently configured for Qwen/vLLM. It uses a strict JSON command loop for `web_search` and `fetch_page` and may emit one tool command or a batched `tools` list per turn.
+- `local_openai_compatible` uses the same local endpoint path without tying the backend id to Qwen.
+- `openai_compatible` uses remote OpenAI-compatible chat completions with the same JSON command loop. Configure it with `models.openai_retrieval`, `retrieval.openai_base_urls`, and `OPENAI_API_KEY` or `OPENAI_COMPATIBLE_API_KEY`.
 - Local retrieval defaults to two parallel agents per school on a 2 x H100 topology. Agents gather evidence across profile, admissions, faculty, and applicant reports, then merge into one `SchoolProfile`.
-- `anthropic_haiku` uses Claude Haiku native tool calls through the Anthropic Messages API. It may emit multiple native tool-use blocks in one response; tool handlers run concurrently.
+- `anthropic_haiku` and `anthropic_sonnet` use native tool calls through the Anthropic Messages API. They may emit multiple native tool-use blocks in one response; tool handlers run concurrently.
 - `web_search` calls Brave Search. `fetch_page` uses `httpx`, strips HTML, and truncates to `config.max_page_chars`.
 - Judge and fit run concurrently for a school, including the post-gap-fill pass.
 - Gap-fill runs only when enabled, the judge returns `insufficient`, and suggested queries are present.
@@ -64,12 +66,12 @@ grad_agent/
   config.py              YAML, .env, and environment config loading
   events.py              pipeline event dataclasses
   retrieval_registry.py  retrieval backend metadata and supported ids
-  llm/vllm.py            OpenAI-compatible local retrieval client
+  llm/vllm.py            OpenAI-compatible retrieval client
   models.py              Pydantic schemas
   tui.py                 Rich live terminal UI
   pipeline/
     retrieval.py         retrieval stage dispatch
-    retrieval_backends.py concrete API and local retrieval implementations
+    retrieval_backends/    concrete API and local retrieval implementations
     local_retrieval.py   local JSON tool-command retrieval loops
     gap_fill.py          targeted insufficient-profile retrieval
     tool_loop.py         shared tool command execution and events
@@ -107,18 +109,21 @@ Secrets are environment-only:
 ANTHROPIC_API_KEY
 BRAVE_API_KEY
 VLLM_API_KEY  # optional, only when local vLLM servers require bearer auth
+OPENAI_API_KEY  # only when retrieval.backend=openai_compatible
+OPENAI_COMPATIBLE_API_KEY  # optional alternate key for compatible providers
 ```
 
 Do not add API keys to `config.yaml`, tests, docs examples with real values, or trajectory logs.
 
 Important config areas:
 
-- `models.*`: Claude and local retrieval model names.
+- `models.*`: Claude, local retrieval, and OpenAI-compatible retrieval model names.
 - `input.cv`, `input.context`, `input.schools`: default input paths.
-- `retrieval.backend`: registered retrieval backend id. Current options are `local_qwen_vllm` and `anthropic_haiku`.
+- `retrieval.backend`: registered retrieval backend id. Current options are `local_qwen_vllm`, `local_openai_compatible`, `openai_compatible`, `anthropic_haiku`, and `anthropic_sonnet`.
 - `retrieval.max_turns`, `max_search_results`, `max_page_chars`: retrieval budgets.
 - `retrieval.local_model_count`: expected number of local model copies.
 - `retrieval.local_base_urls`: local OpenAI-compatible endpoints; length must match `local_model_count`.
+- `retrieval.openai_base_urls`: remote OpenAI-compatible chat-completions endpoints.
 - `retrieval.local_parallel_agents`: per-school local retrieval fanout.
 - `retrieval.local_max_parallel_tool_calls`: concurrent tool calls from one local turn.
 - `judge.retry_gap_fill`, `judge.gap_fill_max_turns`: gap-fill behavior.
@@ -129,9 +134,9 @@ Important config areas:
 
 ## Retrieval Backend Usage
 
-Retrieval backends are registered in `grad_agent/retrieval_registry.py` and implemented in `grad_agent/pipeline/retrieval_backends.py`. To add a backend, add its metadata, implement the `RetrievalBackend.run()` protocol, register the implementation in `_BACKEND_IMPLEMENTATIONS`, and add focused tests for config validation, model selection, dispatch, and endpoint-specific tool-call behavior.
+Retrieval backends are registered in `grad_agent/retrieval_registry.py` and implemented under `grad_agent/pipeline/retrieval_backends/`. To add a backend, add its metadata, implement the `RetrievalBackend.run()` protocol in a separate module in that directory, register the implementation in `_BACKEND_IMPLEMENTATIONS`, and add focused tests for config validation, model selection, dispatch, and endpoint-specific tool-call behavior.
 
-API-based retrieval implementations should keep endpoint calling and retry behavior inside their backend class or a small LLM client helper. Local implementations should use OpenAI-compatible chat completions where possible and keep local process startup outside the Python package.
+API-based retrieval implementations should keep endpoint calling and retry behavior inside their backend class or a small LLM client helper. Local implementations should use OpenAI-compatible chat completions where possible and keep local process startup outside the Python package. The Anthropic backend uses native tool-use blocks; OpenAI-compatible backends use the JSON tool-command loop.
 
 ## Local Endpoint Usage
 
@@ -170,7 +175,7 @@ Useful flags:
 - `--schools PATH`, `--cv PATH`, `--context PATH`: override input paths.
 - `--max-turns N`: override retrieval turn budget.
 - `--max-parallel N`: override max concurrent school pipelines.
-- `--retrieval-backend {anthropic_haiku,local_qwen_vllm}`: override retrieval backend implementation.
+- `--retrieval-backend BACKEND`: override retrieval backend implementation.
 - `--no-gap-fill`: disable insufficient-profile gap-fill.
 - `--verbose`: disable the TUI and enable debug logs.
 
@@ -260,7 +265,7 @@ Use `python3 -m tests.preview_tui` or `python3 -m tests.preview_tui --snapshot` 
 - Keep external tool schemas and handlers in `grad_agent/pipeline/tools.py`.
 - Keep shared retrieval tool execution and `ToolCalled` event behavior in `grad_agent/pipeline/tool_loop.py`.
 - Keep backend selection metadata in `grad_agent/retrieval_registry.py`.
-- Keep concrete retrieval implementation classes in `grad_agent/pipeline/retrieval_backends.py`; `retrieval.py` should remain thin stage dispatch.
+- Keep concrete retrieval implementation classes under `grad_agent/pipeline/retrieval_backends/`; `retrieval.py` should remain thin stage dispatch.
 - Keep local JSON tool-command behavior in `grad_agent/pipeline/local_retrieval.py`.
 - Keep targeted insufficient-profile retrieval in `grad_agent/pipeline/gap_fill.py`.
 - Tool handlers should return strings suitable for LLM consumption, not structured Python objects.

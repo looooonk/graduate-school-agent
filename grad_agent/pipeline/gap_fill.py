@@ -39,7 +39,7 @@ async def run_gap_fill(
             http=http,
             on_event=on_event,
             traj=traj,
-            local_client=local_client,
+            openai_compatible_client=local_client,
             fallback_profile=profile,
         )
     )
