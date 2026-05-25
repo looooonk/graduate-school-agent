@@ -9,6 +9,13 @@
 - Do not add delimiter comments such as long separator lines. Split files or functions when structure is getting too large.
 - Do not commit secrets, generated outputs, local inputs, or trajectory logs.
 
+## Documentation Structure
+
+- Keep `README.md` focused on users: what the tool does, how to install it, how to provide inputs, how to run it, where outputs go, and the minimum backend choices needed to start.
+- Keep implementation details, extension points, package layout, registry behavior, test strategy, and internal data contracts in `AGENTS.md` or focused subdirectory READMEs.
+- Prefer subdirectory READMEs when the detail is useful to someone operating or extending one subsystem, such as deployment-specific setup in `deploy/README.md`.
+- Do not duplicate long backend implementation notes in `README.md`; link or point readers to the relevant technical document instead.
+
 ## Project Overview
 
 This repository implements a graduate school research agent. It researches graduate programs, evaluates profile quality, assesses applicant fit against a CV, and writes Markdown and PDF reports.
@@ -137,6 +144,30 @@ Important config areas:
 - `concurrency.max_sonnet_parallel`: concurrent judge/fit calls.
 - `logs.dir`: set to `""` to disable trajectory logging.
 - `deploy.*`: settings consumed by deployment scripts.
+
+OpenAI-compatible retrieval example:
+
+```yaml
+retrieval:
+  backend: openai_compatible
+  openai_base_urls:
+    - https://api.openai.com/v1
+
+models:
+  openai_retrieval: gpt-4.1-mini
+```
+
+OpenAI-compatible judge example:
+
+```yaml
+judge:
+  backend: openai_compatible
+  openai_base_urls:
+    - https://api.openai.com/v1
+
+models:
+  openai_judge: gpt-4.1
+```
 
 ## Retrieval Backend Usage
 
