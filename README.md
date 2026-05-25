@@ -222,8 +222,3 @@ Preview the TUI without API calls:
 python3 -m tests.preview_tui
 python3 -m tests.preview_tui --snapshot
 ```
-
-The preview uses the school list from `input.schools` in `config.yaml`. Use `--config PATH` to preview another configuration and `--seed N` for repeatable simulated progress.
-The live TUI colors the progress bar by school state, matching the table stage colors. Its compact table shows currently running schools only, keeps each school to one row, and caps visible school rows at 8 when concurrency is higher.
-
-Docs assets live in `resources/`. `resources/demo.tape` is the VHS script used to render `resources/demo.gif`.
