@@ -16,8 +16,8 @@ This repository implements a graduate school research agent. It researches gradu
 Default pipeline:
 
 ```text
-retrieval (local Qwen vLLM) -> judge (Sonnet) + fit (Sonnet) -> Markdown/PDF
-                            -> optional gap-fill -> re-judge + re-fit
+retrieval backend -> judge (Sonnet) + fit (Sonnet) -> Markdown/PDF
+                  -> optional gap-fill -> re-judge + re-fit
 ```
 
 The installed CLI entry point is:
@@ -26,7 +26,7 @@ The installed CLI entry point is:
 grad-agent
 ```
 
-Primary Python dependencies are `anthropic`, `pydantic`, `httpx`, `pyyaml`, `python-dotenv`, `rich`, `markdown`, and `weasyprint`. Default retrieval also expects one or more OpenAI-compatible vLLM servers running `Qwen/Qwen3.6-35B-A3B-FP8`.
+Primary Python dependencies are `anthropic`, `pydantic`, `httpx`, `pyyaml`, `python-dotenv`, `rich`, `markdown`, and `weasyprint`. Default retrieval also expects one or more OpenAI-compatible local endpoints running `Qwen/Qwen3.6-35B-A3B-FP8` through vLLM or an equivalent server.
 
 ## Development Environment
 
@@ -43,17 +43,17 @@ Do not run the full `grad-agent` program for routine validation because it can s
 
 ## Architecture Notes
 
-- Default retrieval uses local Qwen through configured OpenAI-compatible vLLM endpoints.
-- Alternate retrieval uses Claude Haiku native tool calls. Select it with `retrieval.backend: anthropic_haiku` or `--retrieval-backend anthropic_haiku`.
-- Local Qwen retrieval uses a strict JSON command loop for `web_search` and `fetch_page`. It may emit one tool command or a batched `tools` list per turn.
+- Retrieval is dispatched through a modular backend registry. `retrieval.backend` names an implementation, not a one-off conditional path.
+- The currently supported retrieval implementations are `local_qwen_vllm` and `anthropic_haiku`.
+- `local_qwen_vllm` uses local OpenAI-compatible chat completions, currently configured for Qwen/vLLM. It uses a strict JSON command loop for `web_search` and `fetch_page` and may emit one tool command or a batched `tools` list per turn.
 - Local retrieval defaults to two parallel agents per school on a 2 x H100 topology. Agents gather evidence across profile, admissions, faculty, and applicant reports, then merge into one `SchoolProfile`.
-- Anthropic Haiku retrieval may emit multiple native tool-use blocks in one response; tool handlers run concurrently.
+- `anthropic_haiku` uses Claude Haiku native tool calls through the Anthropic Messages API. It may emit multiple native tool-use blocks in one response; tool handlers run concurrently.
 - `web_search` calls Brave Search. `fetch_page` uses `httpx`, strips HTML, and truncates to `config.max_page_chars`.
 - Judge and fit run concurrently for a school, including the post-gap-fill pass.
 - Gap-fill runs only when enabled, the judge returns `insufficient`, and suggested queries are present.
 - Schools run with bounded concurrency from `max_schools_parallel`; concurrent Sonnet calls are bounded separately by `max_sonnet_parallel`.
-- `http.retries` applies to local vLLM endpoint failover, not to fetch/search handlers.
-- Anthropic rate-limit retries are handled by `grad_agent.util.retry.api_create_with_retry`.
+- `http.retries` applies to local endpoint failover, not to fetch/search handlers.
+- API-based retrieval calls should use `grad_agent.util.retry.api_create_with_retry` for rate-limit retry and exponential backoff behavior.
 
 ## Package Layout
 
@@ -63,12 +63,14 @@ grad_agent/
   cli_support.py         CLI input/config override helpers
   config.py              YAML, .env, and environment config loading
   events.py              pipeline event dataclasses
-  llm/vllm.py            OpenAI-compatible local vLLM client
+  retrieval_registry.py  retrieval backend metadata and supported ids
+  llm/vllm.py            OpenAI-compatible local retrieval client
   models.py              Pydantic schemas
   tui.py                 Rich live terminal UI
   pipeline/
-    retrieval.py         Anthropic Haiku loop and backend dispatch
-    local_retrieval.py   local-vLLM JSON tool-command retrieval
+    retrieval.py         retrieval stage dispatch
+    retrieval_backends.py concrete API and local retrieval implementations
+    local_retrieval.py   local JSON tool-command retrieval loops
     gap_fill.py          targeted insufficient-profile retrieval
     tool_loop.py         shared tool command execution and events
     confidence.py        judge-aware fit confidence calibration
@@ -113,10 +115,10 @@ Important config areas:
 
 - `models.*`: Claude and local retrieval model names.
 - `input.cv`, `input.context`, `input.schools`: default input paths.
-- `retrieval.backend`: `local_qwen_vllm` or `anthropic_haiku`.
+- `retrieval.backend`: registered retrieval backend id. Current options are `local_qwen_vllm` and `anthropic_haiku`.
 - `retrieval.max_turns`, `max_search_results`, `max_page_chars`: retrieval budgets.
 - `retrieval.local_model_count`: expected number of local model copies.
-- `retrieval.local_base_urls`: vLLM endpoints; length must match `local_model_count`.
+- `retrieval.local_base_urls`: local OpenAI-compatible endpoints; length must match `local_model_count`.
 - `retrieval.local_parallel_agents`: per-school local retrieval fanout.
 - `retrieval.local_max_parallel_tool_calls`: concurrent tool calls from one local turn.
 - `judge.retry_gap_fill`, `judge.gap_fill_max_turns`: gap-fill behavior.
@@ -125,9 +127,15 @@ Important config areas:
 - `logs.dir`: set to `""` to disable trajectory logging.
 - `deploy.*`: settings consumed by deployment scripts.
 
-## Local vLLM Usage
+## Retrieval Backend Usage
 
-Default runtime expects `retrieval.local_model_count` independent vLLM servers, one per GPU. The default config uses:
+Retrieval backends are registered in `grad_agent/retrieval_registry.py` and implemented in `grad_agent/pipeline/retrieval_backends.py`. To add a backend, add its metadata, implement the `RetrievalBackend.run()` protocol, register the implementation in `_BACKEND_IMPLEMENTATIONS`, and add focused tests for config validation, model selection, dispatch, and endpoint-specific tool-call behavior.
+
+API-based retrieval implementations should keep endpoint calling and retry behavior inside their backend class or a small LLM client helper. Local implementations should use OpenAI-compatible chat completions where possible and keep local process startup outside the Python package.
+
+## Local Endpoint Usage
+
+Default runtime expects `retrieval.local_model_count` independent local OpenAI-compatible servers, one per GPU. The default config uses:
 
 ```text
 http://127.0.0.1:8001/v1
@@ -143,7 +151,7 @@ deploy/start-vllm.sh
 deploy/healthcheck.sh
 ```
 
-The Python app does not launch or supervise vLLM. Keep server startup and node setup in `deploy/` scripts and docs.
+The Python app does not launch or supervise local model servers. Keep server startup and node setup in `deploy/` scripts and docs.
 
 ## CLI Behavior
 
@@ -162,7 +170,7 @@ Useful flags:
 - `--schools PATH`, `--cv PATH`, `--context PATH`: override input paths.
 - `--max-turns N`: override retrieval turn budget.
 - `--max-parallel N`: override max concurrent school pipelines.
-- `--retrieval-backend {anthropic_haiku,local_qwen_vllm}`: override retrieval backend.
+- `--retrieval-backend {anthropic_haiku,local_qwen_vllm}`: override retrieval backend implementation.
 - `--no-gap-fill`: disable insufficient-profile gap-fill.
 - `--verbose`: disable the TUI and enable debug logs.
 
@@ -251,10 +259,12 @@ Use `python3 -m tests.preview_tui` or `python3 -m tests.preview_tui --snapshot` 
 - Keep prompt text and local retrieval protocol text in `grad_agent/pipeline/prompts.py`.
 - Keep external tool schemas and handlers in `grad_agent/pipeline/tools.py`.
 - Keep shared retrieval tool execution and `ToolCalled` event behavior in `grad_agent/pipeline/tool_loop.py`.
-- Keep local vLLM JSON tool-command behavior in `grad_agent/pipeline/local_retrieval.py`; `retrieval.py` should remain the Anthropic loop and backend dispatcher.
+- Keep backend selection metadata in `grad_agent/retrieval_registry.py`.
+- Keep concrete retrieval implementation classes in `grad_agent/pipeline/retrieval_backends.py`; `retrieval.py` should remain thin stage dispatch.
+- Keep local JSON tool-command behavior in `grad_agent/pipeline/local_retrieval.py`.
 - Keep targeted insufficient-profile retrieval in `grad_agent/pipeline/gap_fill.py`.
 - Tool handlers should return strings suitable for LLM consumption, not structured Python objects.
-- Keep local vLLM endpoint calling in `grad_agent/llm/vllm.py`. Do not make the package responsible for launching vLLM processes.
+- Keep local OpenAI-compatible endpoint calling in `grad_agent/llm/vllm.py`. Do not make the package responsible for launching local model processes.
 - Prefer `extract_json_object()` for parsing model JSON.
 - Use `SchoolProfile.model_validate`, `JudgeReport.model_validate`, and `FitAssessment.model_validate` at API boundaries.
 - Preserve partial-failure behavior in `run_school`: retrieval failure returns a stub result; judge, fit, and gap-fill errors are captured in stats instead of crashing the run.

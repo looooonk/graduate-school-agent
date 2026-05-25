@@ -329,7 +329,7 @@ def _finish_school(
 
 
 def _workers_for_config(config: Config) -> tuple[str, ...]:
-    if config.retrieval_backend != "local_qwen_vllm":
+    if not config.uses_local_retrieval:
         return ("main",)
     count = max(1, min(config.local_retrieval_parallel_agents, len(_WORKERS)))
     return _WORKERS[:count]

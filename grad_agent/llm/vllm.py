@@ -1,4 +1,4 @@
-"""OpenAI-compatible chat client for local vLLM retrieval workers."""
+"""OpenAI-compatible chat client for local retrieval workers."""
 
 from __future__ import annotations
 
@@ -26,8 +26,8 @@ class LocalChatResponse:
         return [SimpleNamespace(type="text", text=self.text)]
 
 
-class LocalVLLMClient:
-    """Round-robin client for one or more OpenAI-compatible vLLM endpoints."""
+class OpenAICompatibleLocalClient:
+    """Round-robin client for one or more OpenAI-compatible local endpoints."""
 
     def __init__(
         self,
@@ -38,7 +38,7 @@ class LocalVLLMClient:
         retries: int = 0,
     ) -> None:
         if not base_urls:
-            raise ValueError("At least one vLLM endpoint is required")
+            raise ValueError("At least one local retrieval endpoint is required")
         self._base_urls = tuple(url.rstrip("/") for url in base_urls)
         self._api_key = api_key
         self._timeout = timeout
@@ -47,7 +47,7 @@ class LocalVLLMClient:
         self._lock = asyncio.Lock()
 
     @classmethod
-    def from_config(cls, config: Config) -> LocalVLLMClient:
+    def from_config(cls, config: Config) -> OpenAICompatibleLocalClient:
         return cls(
             config.local_retrieval_endpoints,
             api_key=config.local_retrieval_api_key,
@@ -83,7 +83,7 @@ class LocalVLLMClient:
                 return _parse_response(data, endpoint)
             except (httpx.HTTPError, ValueError, KeyError, IndexError) as exc:
                 last_exc = exc
-        raise RuntimeError(f"All local vLLM endpoints failed: {last_exc}") from last_exc
+        raise RuntimeError(f"All local retrieval endpoints failed: {last_exc}") from last_exc
 
     async def _next_endpoint(self) -> str:
         async with self._lock:
@@ -130,3 +130,6 @@ def _parse_response(data: dict[str, Any], endpoint: str) -> LocalChatResponse:
         ),
         endpoint=endpoint,
     )
+
+
+LocalVLLMClient = OpenAICompatibleLocalClient

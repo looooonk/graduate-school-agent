@@ -17,6 +17,7 @@ from grad_agent.cli_support import config_overrides, load_schools, read_context,
 from grad_agent.config import Config
 from grad_agent.events import EventCallback
 from grad_agent.pipeline.runner import run_all_schools
+from grad_agent.retrieval_registry import retrieval_backend_ids
 from grad_agent.util.log import setup_logging
 
 
@@ -95,9 +96,9 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--retrieval-backend",
-        choices=("anthropic_haiku", "local_qwen_vllm"),
+        choices=retrieval_backend_ids(),
         default=None,
-        help="Override retrieval backend",
+        help="Override retrieval backend implementation",
     )
     parser.add_argument(
         "--no-gap-fill",

@@ -227,6 +227,40 @@ class ConfigTests(unittest.TestCase):
             config.validate(),
         )
 
+    def test_api_retrieval_backend_ignores_local_endpoint_topology(self) -> None:
+        config = Config(
+            anthropic_api_key="anthropic",
+            brave_api_key="brave",
+            haiku_model="haiku",
+            sonnet_model="sonnet",
+            local_retrieval_model="qwen",
+            retrieval_backend="anthropic_haiku",
+            local_retrieval_model_count=0,
+            local_retrieval_base_urls=(),
+            local_retrieval_api_key="",
+            local_retrieval_timeout=0,
+            max_retrieval_turns=2,
+            max_search_results=3,
+            max_page_chars=1000,
+            local_retrieval_parallel_agents=0,
+            local_retrieval_max_parallel_tool_calls=0,
+            cv_path="input/cv.md",
+            context_path="input/context.md",
+            schools_path="input/schools.json",
+            retry_gap_fill=True,
+            gap_fill_max_turns=1,
+            max_schools_parallel=1,
+            max_sonnet_parallel=1,
+            http_timeout=10,
+            http_retries=0,
+            output_dir="output",
+            logs_dir="",
+        )
+
+        self.assertEqual(config.validate(), [])
+        self.assertFalse(config.uses_local_retrieval)
+        self.assertEqual(config.retrieval_model, "haiku")
+
     def test_local_model_count_defaults_to_endpoint_count(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "config.yaml"

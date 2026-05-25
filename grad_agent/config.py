@@ -16,12 +16,13 @@ from typing import Any
 import dotenv
 import yaml
 
+from grad_agent.retrieval_registry import get_retrieval_backend_spec, retrieval_backend_ids
+
 _DEFAULT_YAML_PATH = Path("config.yaml")
 _DEFAULT_LOCAL_RETRIEVAL_BASE_URLS = (
     "http://127.0.0.1:8001/v1",
     "http://127.0.0.1:8002/v1",
 )
-_RETRIEVAL_BACKENDS = {"anthropic_haiku", "local_qwen_vllm"}
 
 
 @dataclass(frozen=True)
@@ -164,13 +165,17 @@ class Config:
             errors.append("ANTHROPIC_API_KEY is required (set in environment or .env)")
         if not self.brave_api_key:
             errors.append("BRAVE_API_KEY is required (set in environment or .env)")
-        if self.retrieval_backend not in _RETRIEVAL_BACKENDS:
-            allowed = ", ".join(sorted(_RETRIEVAL_BACKENDS))
+        backend_spec = get_retrieval_backend_spec(self.retrieval_backend)
+        if backend_spec is None:
+            allowed = ", ".join(retrieval_backend_ids())
             errors.append(f"retrieval.backend must be one of: {allowed}")
-        errors.extend(
-            _validate_positive_int("retrieval.local_model_count", self.local_retrieval_model_count)
-        )
-        if self.retrieval_backend == "local_qwen_vllm":
+        if backend_spec is None or backend_spec.is_local:
+            errors.extend(
+                _validate_positive_int(
+                    "retrieval.local_model_count",
+                    self.local_retrieval_model_count,
+                )
+            )
             if not self.local_retrieval_base_urls:
                 errors.append("retrieval.local_base_urls must include at least one endpoint")
             elif _is_positive_int(self.local_retrieval_model_count) and (
@@ -180,23 +185,27 @@ class Config:
                     "retrieval.local_model_count must match the number of "
                     "retrieval.local_base_urls endpoints"
                 )
+            errors.extend(
+                _validate_positive_int(
+                    "retrieval.local_parallel_agents",
+                    self.local_retrieval_parallel_agents,
+                )
+            )
+            errors.extend(
+                _validate_positive_int(
+                    "retrieval.local_max_parallel_tool_calls",
+                    self.local_retrieval_max_parallel_tool_calls,
+                )
+            )
+            errors.extend(
+                _validate_positive_int("retrieval.local_timeout", self.local_retrieval_timeout)
+            )
         errors.extend(_validate_positive_int("retrieval.max_turns", self.max_retrieval_turns))
         errors.extend(
             _validate_positive_int("retrieval.max_search_results", self.max_search_results)
         )
         errors.extend(
             _validate_positive_int("retrieval.max_page_chars", self.max_page_chars)
-        )
-        errors.extend(
-            _validate_positive_int(
-                "retrieval.local_parallel_agents", self.local_retrieval_parallel_agents
-            )
-        )
-        errors.extend(
-            _validate_positive_int(
-                "retrieval.local_max_parallel_tool_calls",
-                self.local_retrieval_max_parallel_tool_calls,
-            )
         )
         errors.extend(
             _validate_positive_int("judge.gap_fill_max_turns", self.gap_fill_max_turns)
@@ -208,9 +217,6 @@ class Config:
             _validate_positive_int("concurrency.max_sonnet_parallel", self.max_sonnet_parallel)
         )
         errors.extend(_validate_positive_int("http.timeout", self.http_timeout))
-        errors.extend(
-            _validate_positive_int("retrieval.local_timeout", self.local_retrieval_timeout)
-        )
         if (
             isinstance(self.http_retries, bool)
             or not isinstance(self.http_retries, int)
@@ -222,14 +228,16 @@ class Config:
     @property
     def retrieval_model(self) -> str:
         """Return the concrete model used for retrieval and gap-fill."""
-        if self.retrieval_backend == "local_qwen_vllm":
+        backend_spec = get_retrieval_backend_spec(self.retrieval_backend)
+        if backend_spec is None:
             return self.local_retrieval_model
-        return self.haiku_model
+        return str(getattr(self, backend_spec.model_field))
 
     @property
     def uses_local_retrieval(self) -> bool:
-        """Whether retrieval should call local OpenAI-compatible vLLM endpoints."""
-        return self.retrieval_backend == "local_qwen_vllm"
+        """Whether retrieval should call local OpenAI-compatible endpoints."""
+        backend_spec = get_retrieval_backend_spec(self.retrieval_backend)
+        return bool(backend_spec and backend_spec.is_local)
 
     @property
     def local_retrieval_endpoints(self) -> tuple[str, ...]:

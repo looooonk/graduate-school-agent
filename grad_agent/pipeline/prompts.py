@@ -5,9 +5,7 @@ Kept in a separate module so prompt engineering changes don't touch logic.
 
 from __future__ import annotations
 
-# ---------------------------------------------------------------------------
-# Stage 1 — Haiku Retrieval Agent
-# ---------------------------------------------------------------------------
+# Retrieval agent prompt shared by API and local backends.
 
 RETRIEVAL_SYSTEM = """\
 You are a graduate school research assistant. Your job is to populate a \

@@ -68,6 +68,7 @@ _PROGRESS_STAGE_ORDER = ("done", "retrieval", "judge+fit", "gap_fill", "failed",
 class TUIRunSettings:
     retrieval_backend: str = ""
     retrieval_model: str = ""
+    uses_local_retrieval: bool = False
     local_model_count: int = 0
     local_parallel_agents: int = 0
     local_max_parallel_tool_calls: int = 0
@@ -80,6 +81,7 @@ class TUIRunSettings:
         return cls(
             retrieval_backend=getattr(config, "retrieval_backend", ""),
             retrieval_model=getattr(config, "retrieval_model", ""),
+            uses_local_retrieval=bool(getattr(config, "uses_local_retrieval", False)),
             local_model_count=getattr(config, "local_retrieval_model_count", 0),
             local_parallel_agents=getattr(config, "local_retrieval_parallel_agents", 0),
             local_max_parallel_tool_calls=getattr(
@@ -95,7 +97,7 @@ class TUIRunSettings:
         if self.retrieval_backend:
             model = f"/{self.retrieval_model}" if self.retrieval_model else ""
             parts.append(f"retrieval {self.retrieval_backend}{model}")
-        if self.retrieval_backend == "local_qwen_vllm":
+        if self.uses_local_retrieval:
             parts.append(
                 "local "
                 f"{self.local_model_count} models, "

@@ -2,7 +2,7 @@
 
 An LLM research agent for graduate application planning. It gathers program information, checks source quality, assesses applicant fit against a CV, and writes Markdown and PDF reports.
 
-The default pipeline uses local Qwen retrieval through OpenAI-compatible vLLM endpoints, then Claude Sonnet for profile judging and fit assessment. Claude Haiku can be used as the retrieval backend when local vLLM is unavailable.
+The default pipeline uses a modular retrieval backend layer, then Claude Sonnet for profile judging and fit assessment. The currently registered retrieval implementations are a local OpenAI-compatible backend configured for Qwen/vLLM and an API backend for Anthropic Haiku.
 
 ![Graduate School Agent TUI demo](resources/demo.gif)
 Demo run of the TUI.
@@ -10,8 +10,9 @@ Demo run of the TUI.
 ## Features
 
 - Web retrieval with Brave Search and page fetching.
-- Local vLLM retrieval with parallel agents and batched tool calls.
-- Optional Anthropic Haiku retrieval backend.
+- Pluggable retrieval backends for local endpoints or API-based model calls.
+- Local OpenAI-compatible retrieval with parallel agents and batched tool calls.
+- Anthropic Haiku retrieval with native tool calls and retry/backoff handling.
 - Sonnet quality judging for missing, stale, contradictory, or weakly sourced fields.
 - Sonnet CV-aware fit assessment.
 - Optional gap-fill pass for insufficient profiles.
@@ -24,7 +25,7 @@ Demo run of the TUI.
 - Anthropic API key
 - Brave Search API key
 - WeasyPrint native libraries for PDF rendering
-- Local OpenAI-compatible vLLM endpoints for the default retrieval backend
+- Local OpenAI-compatible endpoints for the default retrieval backend
 
 Install in editable mode:
 
@@ -53,7 +54,7 @@ $EDITOR input/cv.md
 
 Optional applicant context can be placed at `input/context.md` for subfield interests, advisor preferences, funding needs, geographic constraints, or scoring guidance.
 
-Start and check local retrieval servers when using the default backend:
+Start and check local retrieval servers when using the default backend implementation:
 
 ```bash
 deploy/start-vllm.sh
@@ -72,7 +73,7 @@ Run one school without editing `input/schools.json`:
 grad-agent --school "MIT" --program "PhD Electrical Engineering and Computer Science" --cv input/cv.md
 ```
 
-Use Anthropic Haiku for retrieval instead of local LLM:
+Use the Anthropic Haiku API backend for retrieval instead of the local backend:
 
 ```bash
 grad-agent --retrieval-backend anthropic_haiku
@@ -110,7 +111,7 @@ Useful flags:
 - `--schools PATH`, `--cv PATH`, `--context PATH`: override input paths.
 - `--max-turns N`: override retrieval turn budget.
 - `--max-parallel N`: override max concurrent school pipelines.
-- `--retrieval-backend {anthropic_haiku,local_qwen_vllm}`: choose retrieval backend.
+- `--retrieval-backend {anthropic_haiku,local_qwen_vllm}`: choose retrieval backend implementation.
 - `--no-gap-fill`: disable targeted gap-fill.
 - `--verbose`: bypass the Rich TUI and print debug logs.
 
@@ -143,14 +144,26 @@ Schools run with bounded concurrency. Judge and fit calls run concurrently for e
 
 `Config.load()` merges built-in defaults, `config.yaml`, `.env`, and explicit CLI overrides. See `config.yaml` for current defaults.
 
-- `retrieval.backend`: `local_qwen_vllm` or `anthropic_haiku`.
+- `retrieval.backend`: registered retrieval backend id. Current options are `local_qwen_vllm` and `anthropic_haiku`.
 - `input.*`: default CV, context, and schools paths.
-- `retrieval.local_model_count` and `retrieval.local_base_urls`: local vLLM topology.
+- `models.local_retrieval` and `models.haiku`: model ids used by the current retrieval implementations.
+- `retrieval.local_model_count` and `retrieval.local_base_urls`: local endpoint topology.
 - `retrieval.local_parallel_agents`: per-school local retrieval fanout.
 - `concurrency.*`: school and Sonnet concurrency limits.
 - `logs.dir`: set to `""` to disable trajectory logging.
 
-## Local vLLM
+## Retrieval Backends
+
+Retrieval is selected by `retrieval.backend` and dispatched through a registry in `grad_agent/retrieval_registry.py`. Concrete implementations live in `grad_agent/pipeline/retrieval_backends.py`.
+
+Current implementations:
+
+- `local_qwen_vllm`: local OpenAI-compatible chat completions. The default model is `Qwen/Qwen3.6-35B-A3B-FP8`; calls round-robin across configured endpoints and fail over according to `http.retries`.
+- `anthropic_haiku`: Anthropic Messages API using native tool-use blocks. API calls go through the shared retry helper with exponential backoff.
+
+To add another retrieval option, add a backend spec, implement the `RetrievalBackend.run()` protocol, register it in `_BACKEND_IMPLEMENTATIONS`, and add focused tests for dispatch, model selection, and any endpoint-specific tool-call behavior.
+
+## Local Endpoints
 
 The default retrieval model is `Qwen/Qwen3.6-35B-A3B-FP8`. The default config expects two endpoints:
 
@@ -159,7 +172,7 @@ http://127.0.0.1:8001/v1
 http://127.0.0.1:8002/v1
 ```
 
-For a different GPU count, set `retrieval.local_model_count`, `retrieval.local_parallel_agents`, and `retrieval.local_base_urls` consistently. The Python app validates endpoint count, round-robins calls, and applies vLLM failover according to `http.retries`; it does not launch or supervise vLLM processes.
+For a different GPU count or local serving layout, set `retrieval.local_model_count`, `retrieval.local_parallel_agents`, and `retrieval.local_base_urls` consistently. The Python app validates endpoint count, round-robins calls, and applies local endpoint failover according to `http.retries`; it does not launch or supervise local model processes.
 
 Deployment helpers:
 
