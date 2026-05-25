@@ -1,8 +1,4 @@
-"""Per-school pipeline runner.
-
-Orchestrates Stage 1 → 2 → 3 for a single school with fault tolerance,
-and provides the top-level parallel launcher for multiple schools.
-"""
+"""Per-school orchestration for the research agent."""
 
 from __future__ import annotations
 
@@ -16,6 +12,11 @@ from pathlib import Path
 import anthropic
 import httpx
 
+from grad_agent.agents.fit.confidence import calibrate_fit_confidence
+from grad_agent.agents.fit.service import run_fit_assessment
+from grad_agent.agents.judge.service import run_judge
+from grad_agent.agents.retrieval.gap_fill import run_gap_fill
+from grad_agent.agents.retrieval.service import run_retrieval
 from grad_agent.config import Config
 from grad_agent.events import (
     EventCallback,
@@ -31,11 +32,6 @@ from grad_agent.models import (
     SchoolProfile,
     SchoolResult,
 )
-from grad_agent.pipeline.confidence import calibrate_fit_confidence
-from grad_agent.pipeline.fit import run_fit_assessment
-from grad_agent.pipeline.gap_fill import run_gap_fill
-from grad_agent.pipeline.judge import run_judge
-from grad_agent.pipeline.retrieval import run_retrieval
 from grad_agent.reporting.markdown import render_school_markdown, render_summary_table
 from grad_agent.reporting.paths import safe_filename
 from grad_agent.reporting.pdf import ReportDirs, ensure_report_dirs, write_markdown_report
@@ -73,7 +69,7 @@ async def run_school(
         traj: Optional trajectory logger; records every API call and tool result.
 
     Returns:
-        A tuple of (SchoolResult, SchoolStats). Never raises — all errors are
+        A tuple of (SchoolResult, SchoolStats). Never raises; all errors are
         captured in SchoolResult.error and SchoolStats.error.
     """
     school_label = f"{school_name} — {program_name}"
@@ -154,7 +150,7 @@ async def run_school(
             and judge_report.suggested_queries
         ):
             log.info(
-                "Judge rated profile as insufficient — running targeted gap-fill (%d queries)",
+                "Judge rated profile as insufficient; running targeted gap-fill (%d queries)",
                 len(judge_report.suggested_queries),
             )
             try:
@@ -267,7 +263,7 @@ async def run_all_schools(
         run_ts = datetime.now().strftime("%Y-%m-%dT%H%M%S")
         run_log_dir = Path(config.logs_dir) / run_ts
         run_log_dir.mkdir(parents=True, exist_ok=True)
-        logger.info("Trajectory logs → %s", run_log_dir)
+        logger.info("Trajectory logs: %s", run_log_dir)
 
     client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key)
     local_client = LocalVLLMClient.from_config(config) if config.uses_local_retrieval else None

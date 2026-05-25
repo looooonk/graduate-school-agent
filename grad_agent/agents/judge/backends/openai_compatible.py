@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from grad_agent.agents.judge.backends.anthropic import _parse_judge_report
+from grad_agent.agents.judge.prompts import JUDGE_SYSTEM, judge_user_prompt
+from grad_agent.agents.judge.types import JudgeRequest
 from grad_agent.llm.vllm import OpenAICompatibleChatClient
 from grad_agent.models import JudgeReport
-from grad_agent.pipeline.judge_backends.anthropic_messages import _parse_judge_report
-from grad_agent.pipeline.judge_backends.base import JudgeRequest
-from grad_agent.pipeline.prompts import JUDGE_SYSTEM, judge_user_prompt
 from grad_agent.reporting.stats import StageStats, add_usage, timed
 from grad_agent.util.log import get_school_logger
 

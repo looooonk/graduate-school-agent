@@ -1,16 +1,16 @@
-"""Stage 1 retrieval dispatch."""
+"""Retrieval agent dispatch."""
 
 from __future__ import annotations
 
 import anthropic
 import httpx
 
+from grad_agent.agents.retrieval.backends import RetrievalRequest, get_retrieval_backend
+from grad_agent.agents.retrieval.prompts import retrieval_user_prompt
 from grad_agent.config import Config
 from grad_agent.events import EventCallback
 from grad_agent.llm.vllm import LocalVLLMClient
 from grad_agent.models import SchoolProfile
-from grad_agent.pipeline.prompts import retrieval_user_prompt
-from grad_agent.pipeline.retrieval_backends import RetrievalRequest, get_retrieval_backend
 from grad_agent.reporting.stats import StageStats
 from grad_agent.reporting.trajectory import TrajectoryLogger
 

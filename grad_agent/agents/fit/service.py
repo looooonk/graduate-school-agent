@@ -1,8 +1,4 @@
-"""Stage 3 — Sonnet Fit Assessor.
-
-Cross-references the applicant's CV against a SchoolProfile to produce
-a structured fit assessment.
-"""
+"""Applicant fit assessor."""
 
 from __future__ import annotations
 
@@ -10,9 +6,9 @@ import logging
 
 import anthropic
 
+from grad_agent.agents.fit.prompts import FIT_SYSTEM, fit_user_prompt
 from grad_agent.config import Config
 from grad_agent.models import FitAssessment, SchoolProfile
-from grad_agent.pipeline.prompts import FIT_SYSTEM, fit_user_prompt
 from grad_agent.reporting.stats import StageStats, add_usage, timed
 from grad_agent.reporting.trajectory import TrajectoryLogger
 from grad_agent.util.json import extract_json_object

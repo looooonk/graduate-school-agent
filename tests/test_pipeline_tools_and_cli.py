@@ -11,20 +11,19 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from grad_agent import cli
-from grad_agent.config import Config
-from grad_agent.pipeline import fit, judge, retrieval, tool_loop
-from grad_agent.pipeline.prompts import (
-    fit_user_prompt,
-    judge_user_prompt,
-    retrieval_turn_status,
-    retrieval_user_prompt,
-)
-from grad_agent.pipeline.tools import (
+from grad_agent.agents import fit, judge, retrieval
+from grad_agent.agents.fit.prompts import fit_user_prompt
+from grad_agent.agents.judge.prompts import judge_user_prompt
+from grad_agent.agents.retrieval import tool_loop
+from grad_agent.agents.retrieval.prompts import retrieval_turn_status, retrieval_user_prompt
+from grad_agent.agents.retrieval.tools import (
     _strip_html,
     dispatch_tool,
     handle_fetch_page,
     handle_web_search,
 )
+from grad_agent.config import Config
+from grad_agent.models import SchoolProfile
 
 
 def _test_config(**overrides: object) -> Config:
@@ -264,7 +263,7 @@ class PipelineStageTests(unittest.IsolatedAsyncioTestCase):
         )
 
         report, stats = await judge.run_judge(
-            retrieval.SchoolProfile(school_name="Example", program_name="MS CS"),
+            SchoolProfile(school_name="Example", program_name="MS CS"),
             _test_config(),
             client,
             context_text="Fall 2027",
@@ -314,7 +313,7 @@ class PipelineStageTests(unittest.IsolatedAsyncioTestCase):
         http = FakeHttp()
 
         report, stats = await judge.run_judge(
-            retrieval.SchoolProfile(school_name="Example", program_name="MS CS"),
+            SchoolProfile(school_name="Example", program_name="MS CS"),
             _test_config(judge_backend="openai_compatible"),
             FakeClient([]),
             http=http,
@@ -349,7 +348,7 @@ class PipelineStageTests(unittest.IsolatedAsyncioTestCase):
 
         assessment, stats = await fit.run_fit_assessment(
             "CV text",
-            retrieval.SchoolProfile(school_name="Example", program_name="MS CS"),
+            SchoolProfile(school_name="Example", program_name="MS CS"),
             _test_config(),
             client,
         )

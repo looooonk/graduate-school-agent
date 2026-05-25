@@ -13,12 +13,12 @@ import logging
 import sys
 from pathlib import Path
 
+from grad_agent.agents.judge.registry import judge_backend_ids
+from grad_agent.agents.retrieval.registry import retrieval_backend_ids
 from grad_agent.cli_support import config_overrides, load_schools, read_context, read_required_text
 from grad_agent.config import Config
 from grad_agent.events import EventCallback
-from grad_agent.judge_registry import judge_backend_ids
-from grad_agent.pipeline.runner import run_all_schools
-from grad_agent.retrieval_registry import retrieval_backend_ids
+from grad_agent.orchestration.runner import run_all_schools
 from grad_agent.util.log import setup_logging
 
 

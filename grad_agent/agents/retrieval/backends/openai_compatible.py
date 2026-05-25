@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from grad_agent.config import Config
-from grad_agent.llm.vllm import OpenAICompatibleChatClient
-from grad_agent.models import SchoolProfile
-from grad_agent.pipeline.local_retrieval import (
+from grad_agent.agents.retrieval.local_loop import (
     run_local_parallel_profile_loop,
     run_local_profile_loop,
 )
-from grad_agent.pipeline.retrieval_backends.base import RetrievalRequest
+from grad_agent.agents.retrieval.types import RetrievalRequest
+from grad_agent.config import Config
+from grad_agent.llm.vllm import OpenAICompatibleChatClient
+from grad_agent.models import SchoolProfile
 from grad_agent.reporting.stats import StageStats
 
 

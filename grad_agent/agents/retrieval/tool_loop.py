@@ -9,9 +9,9 @@ from typing import Any
 
 import httpx
 
+from grad_agent.agents.retrieval.tools import dispatch_tool
 from grad_agent.config import Config
 from grad_agent.events import EventCallback, ToolCalled
-from grad_agent.pipeline.tools import dispatch_tool
 from grad_agent.reporting.stats import StageStats
 from grad_agent.reporting.trajectory import TrajectoryLogger
 

@@ -16,8 +16,11 @@ from typing import Any
 import dotenv
 import yaml
 
-from grad_agent.judge_registry import get_judge_backend_spec, judge_backend_ids
-from grad_agent.retrieval_registry import get_retrieval_backend_spec, retrieval_backend_ids
+from grad_agent.agents.judge.registry import get_judge_backend_spec, judge_backend_ids
+from grad_agent.agents.retrieval.registry import (
+    get_retrieval_backend_spec,
+    retrieval_backend_ids,
+)
 
 _DEFAULT_YAML_PATH = Path("config.yaml")
 _DEFAULT_LOCAL_RETRIEVAL_BASE_URLS = (

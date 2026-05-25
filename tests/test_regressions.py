@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from grad_agent.agents.fit.confidence import calibrate_fit_confidence
 from grad_agent.models import (
     ConfidenceLevel,
     FitAssessment,
@@ -13,7 +14,6 @@ from grad_agent.models import (
     QualityRating,
     SchoolProfile,
 )
-from grad_agent.pipeline.runner import calibrate_fit_confidence
 from grad_agent.reporting.markdown import render_summary_table
 from grad_agent.reporting.trajectory import TrajectoryLogger
 from grad_agent.util import retry

@@ -1,12 +1,4 @@
-"""Tool definitions and execution handlers for the retrieval agent.
-
-Provides two tools:
-  - web_search: queries Brave Search API and returns a list of results
-  - fetch_page: fetches a URL and returns its text content (truncated)
-
-Each tool is defined as an Anthropic tool-use schema dict *and* has a
-corresponding async handler that performs the actual I/O.
-"""
+"""Tool schemas and handlers for the retrieval agent."""
 
 from __future__ import annotations
 
@@ -20,10 +12,6 @@ import httpx
 
 from grad_agent.config import Config
 from grad_agent.util.log import get_school_logger
-
-# ---------------------------------------------------------------------------
-# Anthropic tool-use definitions
-# ---------------------------------------------------------------------------
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -66,17 +54,13 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# HTML stripping
-# ---------------------------------------------------------------------------
-
 _SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s{3,}")
 
 
 def _strip_html(raw: str) -> str:
-    """Rough HTML → plaintext conversion. Good enough for LLM consumption."""
+    """Convert basic HTML to plaintext for LLM consumption."""
     raw = _SCRIPT_STYLE_RE.sub(" ", raw)
     text = _TAG_RE.sub(" ", raw)
     text = html.unescape(text)
@@ -84,10 +68,6 @@ def _strip_html(raw: str) -> str:
     text = _WS_RE.sub("\n", text)
     return text.strip()
 
-
-# ---------------------------------------------------------------------------
-# Tool handlers
-# ---------------------------------------------------------------------------
 
 async def handle_web_search(
     args: dict[str, Any],
@@ -179,10 +159,6 @@ async def handle_fetch_page(
 
     return text
 
-
-# ---------------------------------------------------------------------------
-# Dispatcher
-# ---------------------------------------------------------------------------
 
 TOOL_HANDLERS = {
     "web_search": handle_web_search,

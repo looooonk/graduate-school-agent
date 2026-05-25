@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from grad_agent.agents.retrieval.prompts import RETRIEVAL_SYSTEM, retrieval_turn_status
+from grad_agent.agents.retrieval.tool_loop import ToolCommand, run_tool_commands
+from grad_agent.agents.retrieval.tools import TOOL_DEFINITIONS
+from grad_agent.agents.retrieval.types import RetrievalRequest
 from grad_agent.events import TurnProgress
 from grad_agent.models import SchoolProfile
-from grad_agent.pipeline.prompts import RETRIEVAL_SYSTEM, retrieval_turn_status
-from grad_agent.pipeline.retrieval_backends.base import RetrievalRequest
-from grad_agent.pipeline.tool_loop import ToolCommand, run_tool_commands
-from grad_agent.pipeline.tools import TOOL_DEFINITIONS
 from grad_agent.reporting.stats import StageStats, add_usage, timed
 from grad_agent.util.json import extract_json_object
 from grad_agent.util.log import get_school_logger

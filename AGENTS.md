@@ -73,24 +73,33 @@ grad_agent/
   cli_support.py         CLI input/config override helpers
   config.py              YAML, .env, and environment config loading
   events.py              pipeline event dataclasses
-  judge_registry.py      judge backend metadata and supported ids
-  retrieval_registry.py  retrieval backend metadata and supported ids
   llm/vllm.py            OpenAI-compatible chat client
   models.py              Pydantic schemas
   tui.py                 Rich live terminal UI
-  pipeline/
-    retrieval.py         retrieval stage dispatch
-    retrieval_backends/    concrete API and local retrieval implementations
-    local_retrieval.py   local JSON tool-command retrieval loops
-    gap_fill.py          targeted insufficient-profile retrieval
-    tool_loop.py         shared tool command execution and events
-    confidence.py        judge-aware fit confidence calibration
-    judge.py             judge stage dispatch
-    judge_backends/      concrete judge implementations
-    fit.py               Sonnet CV-aware fit assessor
+  agents/
+    retrieval/
+      registry.py        retrieval backend metadata and supported ids
+      service.py         retrieval dispatch
+      gap_fill.py        targeted insufficient-profile retrieval
+      local_loop.py      JSON tool-command retrieval loops
+      prompts.py         retrieval and gap-fill prompts
+      profile_merge.py   parallel worker profile merging
+      tool_loop.py       shared retrieval tool execution and events
+      tools.py           Brave search and page fetch handlers
+      types.py           retrieval backend protocol and request type
+      backends/          concrete retrieval implementations
+    judge/
+      registry.py        judge backend metadata and supported ids
+      service.py         judge dispatch
+      prompts.py         judge prompts
+      types.py           judge backend protocol and request type
+      backends/          concrete judge implementations
+    fit/
+      service.py         Sonnet CV-aware fit assessor
+      confidence.py      judge-aware fit confidence calibration
+      prompts.py         fit prompts
+  orchestration/
     runner.py            per-school orchestration and output writing
-    prompts.py           system and user prompts
-    tools.py             Brave search and page fetch handlers
   reporting/
     markdown.py          report and summary rendering
     paths.py             filesystem-safe report path helpers
@@ -171,13 +180,13 @@ models:
 
 ## Retrieval Backend Usage
 
-Retrieval backends are registered in `grad_agent/retrieval_registry.py` and implemented under `grad_agent/pipeline/retrieval_backends/`. To add a backend, add its metadata, implement the `RetrievalBackend.run()` protocol in a separate module in that directory, register the implementation in `_BACKEND_IMPLEMENTATIONS`, and add focused tests for config validation, model selection, dispatch, and endpoint-specific tool-call behavior.
+Retrieval backends are registered in `grad_agent/agents/retrieval/registry.py` and implemented under `grad_agent/agents/retrieval/backends/`. To add a backend, add its metadata, implement the `RetrievalBackend.run()` protocol in a separate module in that directory, register the implementation in `_BACKEND_IMPLEMENTATIONS`, and add focused tests for config validation, model selection, dispatch, and endpoint-specific tool-call behavior.
 
 API-based retrieval implementations should keep endpoint calling and retry behavior inside their backend class or a small LLM client helper. Local implementations should use OpenAI-compatible chat completions where possible and keep local process startup outside the Python package. The Anthropic backend uses native tool-use blocks; OpenAI-compatible backends use the JSON tool-command loop.
 
 ## Judge Backend Usage
 
-Judge backends are registered in `grad_agent/judge_registry.py` and implemented under `grad_agent/pipeline/judge_backends/`. To add a backend, add its metadata, implement the `JudgeBackend.run()` protocol in a separate module in that directory, register the implementation in `_BACKEND_IMPLEMENTATIONS`, and add focused tests for config validation, model selection, dispatch, and endpoint-specific response handling.
+Judge backends are registered in `grad_agent/agents/judge/registry.py` and implemented under `grad_agent/agents/judge/backends/`. To add a backend, add its metadata, implement the `JudgeBackend.run()` protocol in a separate module in that directory, register the implementation in `_BACKEND_IMPLEMENTATIONS`, and add focused tests for config validation, model selection, dispatch, and endpoint-specific response handling.
 
 ## Local Endpoint Usage
 
@@ -262,7 +271,7 @@ Model validators intentionally accept common LLM output variants, including stri
 - `reporting/pdf.py` converts generated Markdown reports to simple styled PDFs.
 - Keep raw Markdown under `output/markdown/` and matching PDFs under `output/pdf/`.
 - Summary ranking uses confidence-adjusted fit scores: high `1.0`, medium `0.85`, low `0.65`.
-- `pipeline.confidence.calibrate_fit_confidence()` forces low confidence for insufficient profiles and caps partial profiles at medium confidence.
+- `agents.fit.confidence.calibrate_fit_confidence()` forces low confidence for insufficient profiles and caps partial profiles at medium confidence.
 
 ## TUI and Events
 
@@ -303,15 +312,18 @@ Use `python3 -m tests.preview_tui` or `python3 -m tests.preview_tui --snapshot` 
 
 ## Development Notes
 
-- Keep prompt text and local retrieval protocol text in `grad_agent/pipeline/prompts.py`.
-- Keep external tool schemas and handlers in `grad_agent/pipeline/tools.py`.
-- Keep shared retrieval tool execution and `ToolCalled` event behavior in `grad_agent/pipeline/tool_loop.py`.
-- Keep backend selection metadata in `grad_agent/retrieval_registry.py`.
-- Keep judge backend selection metadata in `grad_agent/judge_registry.py`.
-- Keep concrete retrieval implementation classes under `grad_agent/pipeline/retrieval_backends/`; `retrieval.py` should remain thin stage dispatch.
-- Keep concrete judge implementation classes under `grad_agent/pipeline/judge_backends/`; `judge.py` should remain thin stage dispatch.
-- Keep local JSON tool-command behavior in `grad_agent/pipeline/local_retrieval.py`.
-- Keep targeted insufficient-profile retrieval in `grad_agent/pipeline/gap_fill.py`.
+- Keep retrieval prompt text and local retrieval protocol text in `grad_agent/agents/retrieval/prompts.py`.
+- Keep judge prompt text in `grad_agent/agents/judge/prompts.py`.
+- Keep fit prompt text in `grad_agent/agents/fit/prompts.py`.
+- Keep external retrieval tool schemas and handlers in `grad_agent/agents/retrieval/tools.py`.
+- Keep shared retrieval tool execution and `ToolCalled` event behavior in `grad_agent/agents/retrieval/tool_loop.py`.
+- Keep retrieval backend selection metadata in `grad_agent/agents/retrieval/registry.py`.
+- Keep judge backend selection metadata in `grad_agent/agents/judge/registry.py`.
+- Keep concrete retrieval implementation classes under `grad_agent/agents/retrieval/backends/`; `agents/retrieval/service.py` should remain thin dispatch.
+- Keep concrete judge implementation classes under `grad_agent/agents/judge/backends/`; `agents/judge/service.py` should remain thin dispatch.
+- Keep local JSON tool-command behavior in `grad_agent/agents/retrieval/local_loop.py`.
+- Keep parallel worker profile merging in `grad_agent/agents/retrieval/profile_merge.py`.
+- Keep targeted insufficient-profile retrieval in `grad_agent/agents/retrieval/gap_fill.py`.
 - Tool handlers should return strings suitable for LLM consumption, not structured Python objects.
 - Keep local OpenAI-compatible endpoint calling in `grad_agent/llm/vllm.py`. Do not make the package responsible for launching local model processes.
 - Prefer `extract_json_object()` for parsing model JSON.

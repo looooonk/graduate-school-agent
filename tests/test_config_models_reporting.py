@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from pydantic import ValidationError
 
+from grad_agent.agents.fit.confidence import calibrate_fit_confidence
 from grad_agent.config import Config
 from grad_agent.models import (
     ConfidenceLevel,
@@ -20,7 +21,7 @@ from grad_agent.models import (
     QualityRating,
     SchoolProfile,
 )
-from grad_agent.pipeline.runner import _safe_filename, calibrate_fit_confidence
+from grad_agent.orchestration.runner import _safe_filename
 from grad_agent.reporting.markdown import render_school_markdown, render_summary_table
 from grad_agent.reporting.pdf import pdf_path_for_markdown, report_dirs
 from grad_agent.reporting.stats import (

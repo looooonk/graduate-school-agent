@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from grad_agent.judge_registry import JUDGE_BACKENDS
-from grad_agent.pipeline.judge_backends.anthropic_messages import AnthropicMessagesJudgeBackend
-from grad_agent.pipeline.judge_backends.base import JudgeBackend, JudgeRequest
-from grad_agent.pipeline.judge_backends.openai_compatible import OpenAICompatibleJudgeBackend
+from grad_agent.agents.judge.backends.anthropic import AnthropicMessagesJudgeBackend
+from grad_agent.agents.judge.backends.openai_compatible import OpenAICompatibleJudgeBackend
+from grad_agent.agents.judge.registry import JUDGE_BACKENDS
+from grad_agent.agents.judge.types import JudgeBackend, JudgeRequest
 
 _BACKEND_IMPLEMENTATIONS: dict[str, JudgeBackend] = {
     "anthropic_sonnet": AnthropicMessagesJudgeBackend(),

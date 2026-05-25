@@ -1,9 +1,4 @@
-"""Pydantic models for all structured data flowing through the pipeline.
-
-Mirrors the schemas defined in DESIGN.md with minor ergonomic additions
-(optional fields, default factories) so partially-populated profiles can
-exist mid-retrieval without validation failures.
-"""
+"""Pydantic models for structured data shared across agents."""
 
 from __future__ import annotations
 
@@ -12,9 +7,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-# ---------------------------------------------------------------------------
-# Stage 1 — SchoolProfile
-# ---------------------------------------------------------------------------
 
 class GREPolicy(StrEnum):
     REQUIRED = "Required"
@@ -168,7 +160,7 @@ class SchoolProfile(BaseModel):
     @field_validator("deadline", mode="before")
     @classmethod
     def coerce_deadline(cls, v: Any) -> str | None:
-        """Accept a dict of deadline types (e.g. {'fall': 'March 1'}) → single string."""
+        """Accept a dict of deadline types as a single string."""
         if isinstance(v, dict):
             return "; ".join(f"{k}: {val}" for k, val in v.items() if val)
         return v
@@ -207,7 +199,7 @@ class SchoolProfile(BaseModel):
     @field_validator("sources", mode="before")
     @classmethod
     def coerce_sources(cls, v: Any) -> list[str]:
-        """Accept list[str] or a dict mapping category → URL."""
+        """Accept list[str] or a dict mapping category to URL."""
         if isinstance(v, dict):
             return [str(url) for url in v.values() if url]
         return v or []
@@ -219,10 +211,6 @@ class SchoolProfile(BaseModel):
             return "\n".join(str(x) for x in v if x)
         return v
 
-
-# ---------------------------------------------------------------------------
-# Stage 2 — JudgeReport
-# ---------------------------------------------------------------------------
 
 class QualityRating(StrEnum):
     PASS = "pass"
@@ -244,10 +232,6 @@ class JudgeReport(BaseModel):
     notes: str | None = None
 
 
-# ---------------------------------------------------------------------------
-# Stage 3 — FitAssessment
-# ---------------------------------------------------------------------------
-
 class ConfidenceLevel(StrEnum):
     HIGH = "high"
     MEDIUM = "medium"
@@ -264,10 +248,6 @@ class FitAssessment(BaseModel):
     gaps: str
     confidence: ConfidenceLevel
 
-
-# ---------------------------------------------------------------------------
-# Pipeline composite
-# ---------------------------------------------------------------------------
 
 class SchoolResult(BaseModel):
     """Aggregated result for a single school after all stages complete."""

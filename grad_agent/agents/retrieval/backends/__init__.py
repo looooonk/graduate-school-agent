@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from grad_agent.llm.vllm import OpenAICompatibleChatClient
-from grad_agent.pipeline.retrieval_backends.anthropic_tool_use import AnthropicToolUseBackend
-from grad_agent.pipeline.retrieval_backends.base import RetrievalBackend, RetrievalRequest
-from grad_agent.pipeline.retrieval_backends.openai_compatible import (
+from grad_agent.agents.retrieval.backends.anthropic import AnthropicToolUseBackend
+from grad_agent.agents.retrieval.backends.openai_compatible import (
     OpenAICompatibleToolCommandBackend,
 )
-from grad_agent.retrieval_registry import RETRIEVAL_BACKENDS
+from grad_agent.agents.retrieval.registry import RETRIEVAL_BACKENDS
+from grad_agent.agents.retrieval.types import RetrievalBackend, RetrievalRequest
+from grad_agent.llm.vllm import OpenAICompatibleChatClient
 
 _BACKEND_IMPLEMENTATIONS: dict[str, RetrievalBackend] = {
     "anthropic_haiku": AnthropicToolUseBackend(),
