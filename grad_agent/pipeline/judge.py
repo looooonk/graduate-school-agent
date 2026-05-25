@@ -1,24 +1,16 @@
-"""Stage 2 — Sonnet Judge.
-
-Single-pass quality and coverage assessment of a SchoolProfile.
-"""
+"""Stage 2 judge dispatch."""
 
 from __future__ import annotations
 
-import logging
-
 import anthropic
+import httpx
 
 from grad_agent.config import Config
+from grad_agent.llm.vllm import OpenAICompatibleChatClient
 from grad_agent.models import JudgeReport, SchoolProfile
-from grad_agent.pipeline.prompts import JUDGE_SYSTEM, judge_user_prompt
-from grad_agent.reporting.stats import StageStats, add_usage, timed
+from grad_agent.pipeline.judge_backends import JudgeRequest, get_judge_backend
+from grad_agent.reporting.stats import StageStats
 from grad_agent.reporting.trajectory import TrajectoryLogger
-from grad_agent.util.json import extract_json_object
-from grad_agent.util.log import get_school_logger
-from grad_agent.util.retry import api_create_with_retry
-
-logger = logging.getLogger(__name__)
 
 
 async def run_judge(
@@ -27,6 +19,8 @@ async def run_judge(
     client: anthropic.AsyncAnthropic,
     context_text: str = "",
     traj: TrajectoryLogger | None = None,
+    http: httpx.AsyncClient | None = None,
+    openai_compatible_client: OpenAICompatibleChatClient | None = None,
 ) -> tuple[JudgeReport, StageStats]:
     """Evaluate a SchoolProfile and return a JudgeReport.
 
@@ -37,6 +31,8 @@ async def run_judge(
         context_text: Optional applicant context used to prioritise gap detection
             for fields relevant to the applicant's subfield and goals.
         traj: Optional trajectory logger for recording API interactions.
+        http: Optional HTTP client used by OpenAI-compatible judge backends.
+        openai_compatible_client: Optional injected OpenAI-compatible client for tests.
 
     Returns:
         A tuple of (JudgeReport, StageStats).
@@ -44,55 +40,15 @@ async def run_judge(
     Raises:
         RuntimeError: If the model fails to produce a valid JudgeReport.
     """
-    school_label = f"{profile.school_name} — {profile.program_name}"
-    log = get_school_logger(__name__, school_label)
-    stats = StageStats(stage="judge", model=config.sonnet_model)
-
-    if traj:
-        traj.log_stage_start("judge")
-
-    profile_json = profile.model_dump_json(indent=2)
-
-    with timed() as elapsed:
-        response = await api_create_with_retry(
-            lambda: client.messages.create(
-                model=config.sonnet_model,
-                max_tokens=2048,
-                system=JUDGE_SYSTEM,
-                messages=[
-                    {"role": "user", "content": judge_user_prompt(profile_json, context_text)}
-                ],
-            )
+    backend = get_judge_backend(config.judge_backend)
+    return await backend.run(
+        JudgeRequest(
+            profile=profile,
+            config=config,
+            anthropic_client=client,
+            context_text=context_text,
+            traj=traj,
+            http=http,
+            openai_compatible_client=openai_compatible_client,
         )
-
-        stats.api_calls += 1
-        add_usage(stats, response.usage)
-        if traj:
-            traj.log_api_response("judge", 1, config.sonnet_model, response)
-
-    stats.elapsed_seconds = elapsed[0]
-
-    text_parts = [block.text for block in response.content if block.type == "text"]
-    full_text = "\n".join(text_parts)
-
-    parsed = extract_json_object(full_text)
-    if parsed is None:
-        log.error("Judge produced no parseable JSON")
-        raise RuntimeError(f"Judge failed to produce valid JSON for {school_label}")
-
-    try:
-        report = JudgeReport.model_validate(parsed)
-    except Exception as exc:
-        log.error("Judge output validation failed: %s", exc)
-        raise RuntimeError(f"Judge output validation failed for {school_label}: {exc}") from exc
-
-    log.info(
-        "Judge verdict: %s (%d flags, %d suggested queries)",
-        report.overall_quality.value,
-        len(report.flagged_fields),
-        len(report.suggested_queries),
     )
-    if traj:
-        traj.log_judge_report(report)
-        traj.log_stage_end("judge", elapsed[0])
-    return report, stats

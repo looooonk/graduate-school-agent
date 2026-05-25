@@ -16,6 +16,7 @@ from typing import Any
 import dotenv
 import yaml
 
+from grad_agent.judge_registry import get_judge_backend_spec, judge_backend_ids
 from grad_agent.retrieval_registry import get_retrieval_backend_spec, retrieval_backend_ids
 
 _DEFAULT_YAML_PATH = Path("config.yaml")
@@ -24,6 +25,7 @@ _DEFAULT_LOCAL_RETRIEVAL_BASE_URLS = (
     "http://127.0.0.1:8002/v1",
 )
 _DEFAULT_OPENAI_RETRIEVAL_BASE_URLS = ("https://api.openai.com/v1",)
+_DEFAULT_OPENAI_JUDGE_BASE_URLS = ("https://api.openai.com/v1",)
 
 
 @dataclass(frozen=True)
@@ -78,6 +80,13 @@ class Config:
     openai_retrieval_api_key: str = ""
     openai_retrieval_timeout: int = 120
 
+    # --- Modular judge backend ---
+    judge_backend: str = "anthropic_sonnet"
+    openai_judge_model: str = "gpt-4.1"
+    openai_judge_base_urls: tuple[str, ...] = _DEFAULT_OPENAI_JUDGE_BASE_URLS
+    openai_judge_api_key: str = ""
+    openai_judge_timeout: int = 120
+
     @classmethod
     def load(
         cls,
@@ -114,6 +123,12 @@ class Config:
                 _get(raw, "retrieval.openai_base_urls", _DEFAULT_OPENAI_RETRIEVAL_BASE_URLS),
             )
         )
+        openai_judge_base_urls = _as_tuple(
+            ov.get(
+                "openai_judge_base_urls",
+                _get(raw, "judge.openai_base_urls", _DEFAULT_OPENAI_JUDGE_BASE_URLS),
+            )
+        )
 
         return cls(
             anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
@@ -130,9 +145,17 @@ class Config:
                 "openai_retrieval_model",
                 _get(raw, "models.openai_retrieval", "gpt-4.1-mini"),
             ),
+            openai_judge_model=ov.get(
+                "openai_judge_model",
+                _get(raw, "models.openai_judge", "gpt-4.1"),
+            ),
             retrieval_backend=ov.get(
                 "retrieval_backend",
                 _get(raw, "retrieval.backend", "local_qwen_vllm"),
+            ),
+            judge_backend=ov.get(
+                "judge_backend",
+                _get(raw, "judge.backend", "anthropic_sonnet"),
             ),
             local_retrieval_model_count=local_retrieval_model_count,
             local_retrieval_base_urls=local_retrieval_base_urls,
@@ -157,6 +180,24 @@ class Config:
             openai_retrieval_timeout=ov.get(
                 "openai_retrieval_timeout",
                 _get(raw, "retrieval.openai_timeout", 120),
+            ),
+            openai_judge_base_urls=openai_judge_base_urls,
+            openai_judge_api_key=ov.get(
+                "openai_judge_api_key",
+                os.environ.get(
+                    "OPENAI_JUDGE_API_KEY",
+                    os.environ.get(
+                        "OPENAI_COMPATIBLE_API_KEY",
+                        os.environ.get(
+                            "OPENAI_API_KEY",
+                            _get(raw, "judge.openai_api_key", ""),
+                        ),
+                    ),
+                ),
+            ),
+            openai_judge_timeout=ov.get(
+                "openai_judge_timeout",
+                _get(raw, "judge.openai_timeout", 120),
             ),
             max_retrieval_turns=ov.get("max_retrieval_turns", _get(raw, "retrieval.max_turns", 15)),
             max_search_results=ov.get(
@@ -247,6 +288,25 @@ class Config:
             errors.extend(
                 _validate_positive_int("retrieval.openai_timeout", self.openai_retrieval_timeout)
             )
+        judge_spec = get_judge_backend_spec(self.judge_backend)
+        if judge_spec is None:
+            allowed = ", ".join(judge_backend_ids())
+            errors.append(f"judge.backend must be one of: {allowed}")
+        if judge_spec and judge_spec.is_openai_compatible_api:
+            if not isinstance(self.openai_judge_model, str) or (
+                not self.openai_judge_model.strip()
+            ):
+                errors.append("models.openai_judge must be set")
+            if not self.openai_judge_base_urls:
+                errors.append("judge.openai_base_urls must include at least one endpoint")
+            if not self.openai_judge_api_key:
+                errors.append(
+                    "OPENAI_API_KEY, OPENAI_COMPATIBLE_API_KEY, or OPENAI_JUDGE_API_KEY "
+                    "is required for judge.backend=openai_compatible"
+                )
+            errors.extend(
+                _validate_positive_int("judge.openai_timeout", self.openai_judge_timeout)
+            )
         errors.extend(_validate_positive_int("retrieval.max_turns", self.max_retrieval_turns))
         errors.extend(
             _validate_positive_int("retrieval.max_search_results", self.max_search_results)
@@ -278,6 +338,14 @@ class Config:
         backend_spec = get_retrieval_backend_spec(self.retrieval_backend)
         if backend_spec is None:
             return self.local_retrieval_model
+        return str(getattr(self, backend_spec.model_field))
+
+    @property
+    def judge_model(self) -> str:
+        """Return the concrete model used for profile quality judging."""
+        backend_spec = get_judge_backend_spec(self.judge_backend)
+        if backend_spec is None:
+            return self.sonnet_model
         return str(getattr(self, backend_spec.model_field))
 
     @property

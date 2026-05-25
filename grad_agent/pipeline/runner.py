@@ -119,11 +119,11 @@ async def run_school(
             try:
                 async with _maybe_semaphore(sonnet_semaphore):
                     judge_report, judge_stats = await run_judge(
-                        profile, config, client, context_text, traj,
+                        profile, config, client, context_text, traj, http,
                     )
             except Exception as exc:
                 log.error("Judge failed: %s", exc)
-                judge_stats = StageStats(stage="judge", model=config.sonnet_model)
+                judge_stats = StageStats(stage="judge", model=config.judge_model)
                 stage_errors.append(f"Judge failed: {exc}")
 
         async def _run_fit() -> None:
@@ -184,11 +184,11 @@ async def run_school(
                     try:
                         async with _maybe_semaphore(sonnet_semaphore):
                             post_judge, post_judge_stats = await run_judge(
-                                profile, config, client, context_text, traj,
+                                profile, config, client, context_text, traj, http,
                             )
                     except Exception as exc:
                         log.error("Post-gap-fill judge failed: %s", exc)
-                        post_judge_stats = StageStats(stage="judge", model=config.sonnet_model)
+                        post_judge_stats = StageStats(stage="judge", model=config.judge_model)
                         post_errors.append(f"Post-gap-fill judge failed: {exc}")
 
                 async def _run_post_fit() -> None:

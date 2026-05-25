@@ -236,7 +236,7 @@ class FlaggedField(BaseModel):
 
 
 class JudgeReport(BaseModel):
-    """Quality / coverage assessment produced by the Sonnet judge."""
+    """Quality / coverage assessment produced by the judge stage."""
 
     overall_quality: QualityRating
     flagged_fields: list[FlaggedField] = Field(default_factory=list)

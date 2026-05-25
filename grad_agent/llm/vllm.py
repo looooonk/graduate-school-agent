@@ -1,4 +1,4 @@
-"""OpenAI-compatible chat client for retrieval workers."""
+"""OpenAI-compatible chat client for API and local model workers."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ class OpenAICompatibleChatClient:
         retries: int = 0,
     ) -> None:
         if not base_urls:
-            raise ValueError("At least one retrieval endpoint is required")
+            raise ValueError("At least one OpenAI-compatible endpoint is required")
         self._base_urls = tuple(url.rstrip("/") for url in base_urls)
         self._api_key = api_key
         self._timeout = timeout
@@ -61,6 +61,15 @@ class OpenAICompatibleChatClient:
             config.openai_retrieval_base_urls,
             api_key=config.openai_retrieval_api_key,
             timeout=config.openai_retrieval_timeout,
+            retries=config.http_retries,
+        )
+
+    @classmethod
+    def from_judge_config(cls, config: Config) -> OpenAICompatibleChatClient:
+        return cls(
+            config.openai_judge_base_urls,
+            api_key=config.openai_judge_api_key,
+            timeout=config.openai_judge_timeout,
             retries=config.http_retries,
         )
 
@@ -96,7 +105,7 @@ class OpenAICompatibleChatClient:
                 return _parse_response(data, endpoint)
             except (httpx.HTTPError, ValueError, KeyError, IndexError) as exc:
                 last_exc = exc
-        raise RuntimeError(f"All retrieval endpoints failed: {last_exc}") from last_exc
+        raise RuntimeError(f"All OpenAI-compatible endpoints failed: {last_exc}") from last_exc
 
     async def _next_endpoint(self) -> str:
         async with self._lock:

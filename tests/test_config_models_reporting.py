@@ -54,6 +54,7 @@ class ConfigTests(unittest.TestCase):
                         "  sonnet: yaml-sonnet",
                         "  local_retrieval: yaml-qwen",
                         "  openai_retrieval: yaml-openai",
+                        "  openai_judge: yaml-openai-judge",
                         "input:",
                         "  cv: yaml-cv.md",
                         "  context: yaml-context.md",
@@ -71,6 +72,11 @@ class ConfigTests(unittest.TestCase):
                         "  local_max_parallel_tool_calls: 6",
                         "  max_turns: 9",
                         "  max_search_results: 7",
+                        "judge:",
+                        "  backend: openai_compatible",
+                        "  openai_base_urls:",
+                        "    - https://example-judge.test/v1",
+                        "  openai_timeout: 55",
                         "concurrency:",
                         "  max_sonnet_parallel: 4",
                         "output:",
@@ -88,6 +94,7 @@ class ConfigTests(unittest.TestCase):
                     "ANTHROPIC_API_KEY": "anthropic-test-key",
                     "BRAVE_API_KEY": "brave-test-key",
                     "OPENAI_COMPATIBLE_API_KEY": "openai-compatible-key",
+                    "OPENAI_JUDGE_API_KEY": "openai-judge-key",
                 },
                 clear=True,
             ), patch("grad_agent.config.dotenv.load_dotenv", return_value=True):
@@ -106,16 +113,22 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.sonnet_model, "yaml-sonnet")
         self.assertEqual(config.local_retrieval_model, "yaml-qwen")
         self.assertEqual(config.openai_retrieval_model, "yaml-openai")
+        self.assertEqual(config.openai_judge_model, "yaml-openai-judge")
         self.assertEqual(config.retrieval_backend, "local_qwen_vllm")
+        self.assertEqual(config.judge_backend, "openai_compatible")
         self.assertEqual(config.local_retrieval_model_count, 1)
         self.assertEqual(config.local_retrieval_base_urls, ("http://127.0.0.1:9001/v1",))
         self.assertEqual(config.openai_retrieval_base_urls, ("https://example-openai.test/v1",))
         self.assertEqual(config.openai_retrieval_api_key, "openai-compatible-key")
+        self.assertEqual(config.openai_judge_base_urls, ("https://example-judge.test/v1",))
+        self.assertEqual(config.openai_judge_api_key, "openai-judge-key")
         self.assertEqual(config.local_retrieval_timeout, 120)
         self.assertEqual(config.openai_retrieval_timeout, 45)
+        self.assertEqual(config.openai_judge_timeout, 55)
         self.assertEqual(config.local_retrieval_parallel_agents, 3)
         self.assertEqual(config.local_retrieval_max_parallel_tool_calls, 6)
         self.assertEqual(config.retrieval_model, "yaml-qwen")
+        self.assertEqual(config.judge_model, "yaml-openai-judge")
         self.assertEqual(config.max_retrieval_turns, 3)
         self.assertEqual(config.max_search_results, 7)
         self.assertEqual(config.max_sonnet_parallel, 4)
@@ -153,6 +166,7 @@ class ConfigTests(unittest.TestCase):
             http_retries=-1,
             output_dir="output",
             logs_dir="logs",
+            judge_backend="bad",
         )
 
         errors = config.validate()
@@ -164,6 +178,11 @@ class ConfigTests(unittest.TestCase):
         self.assertIn(
             "retrieval.backend must be one of: anthropic_haiku, anthropic_sonnet, "
             "local_openai_compatible, local_qwen_vllm, openai_compatible",
+            errors,
+        )
+        self.assertIn(
+            "judge.backend must be one of: anthropic_haiku, anthropic_sonnet, "
+            "openai_compatible",
             errors,
         )
         self.assertIn("retrieval.local_model_count must be an integer >= 1", errors)
@@ -187,9 +206,13 @@ class ConfigTests(unittest.TestCase):
             config = Config.load(yaml_path=Path("/does/not/exist.yaml"))
 
         self.assertEqual(config.retrieval_backend, "local_qwen_vllm")
+        self.assertEqual(config.judge_backend, "anthropic_sonnet")
         self.assertEqual(config.retrieval_model, "Qwen/Qwen3.6-35B-A3B-FP8")
+        self.assertEqual(config.judge_model, "claude-sonnet-4-6")
         self.assertEqual(config.openai_retrieval_model, "gpt-4.1-mini")
+        self.assertEqual(config.openai_judge_model, "gpt-4.1")
         self.assertEqual(config.openai_retrieval_base_urls, ("https://api.openai.com/v1",))
+        self.assertEqual(config.openai_judge_base_urls, ("https://api.openai.com/v1",))
         self.assertEqual(config.local_retrieval_model_count, 2)
         self.assertEqual(config.local_retrieval_parallel_agents, 2)
         self.assertEqual(config.local_retrieval_max_parallel_tool_calls, 8)
@@ -314,6 +337,44 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.retrieval_model, "openai-test")
         self.assertFalse(config.uses_local_retrieval)
 
+    def test_openai_compatible_judge_backend_uses_api_settings(self) -> None:
+        config = Config(
+            anthropic_api_key="anthropic",
+            brave_api_key="brave",
+            haiku_model="haiku",
+            sonnet_model="sonnet",
+            local_retrieval_model="qwen",
+            retrieval_backend="anthropic_haiku",
+            local_retrieval_model_count=0,
+            local_retrieval_base_urls=(),
+            local_retrieval_api_key="",
+            local_retrieval_timeout=0,
+            max_retrieval_turns=2,
+            max_search_results=3,
+            max_page_chars=1000,
+            local_retrieval_parallel_agents=0,
+            local_retrieval_max_parallel_tool_calls=0,
+            cv_path="input/cv.md",
+            context_path="input/context.md",
+            schools_path="input/schools.json",
+            retry_gap_fill=True,
+            gap_fill_max_turns=1,
+            max_schools_parallel=1,
+            max_sonnet_parallel=1,
+            http_timeout=10,
+            http_retries=0,
+            output_dir="output",
+            logs_dir="",
+            judge_backend="openai_compatible",
+            openai_judge_model="judge-openai-test",
+            openai_judge_base_urls=("https://judge.example.test/v1",),
+            openai_judge_api_key="judge-key",
+            openai_judge_timeout=30,
+        )
+
+        self.assertEqual(config.validate(), [])
+        self.assertEqual(config.judge_model, "judge-openai-test")
+
     def test_new_backend_aliases_select_expected_models(self) -> None:
         base = {
             "anthropic_api_key": "anthropic",
@@ -345,6 +406,10 @@ class ConfigTests(unittest.TestCase):
             "openai_retrieval_base_urls": ("https://api.example.test/v1",),
             "openai_retrieval_api_key": "openai-key",
             "openai_retrieval_timeout": 30,
+            "openai_judge_model": "openai-judge-model",
+            "openai_judge_base_urls": ("https://judge.example.test/v1",),
+            "openai_judge_api_key": "judge-key",
+            "openai_judge_timeout": 30,
         }
 
         local = Config(**base, retrieval_backend="local_openai_compatible")
@@ -356,6 +421,21 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(sonnet.validate(), [])
         self.assertFalse(sonnet.uses_local_retrieval)
         self.assertEqual(sonnet.retrieval_model, "sonnet")
+
+        judge_haiku = Config(
+            **base,
+            retrieval_backend="anthropic_haiku",
+            judge_backend="anthropic_haiku",
+        )
+        judge_openai = Config(
+            **base,
+            retrieval_backend="anthropic_haiku",
+            judge_backend="openai_compatible",
+        )
+        self.assertEqual(judge_haiku.validate(), [])
+        self.assertEqual(judge_haiku.judge_model, "haiku")
+        self.assertEqual(judge_openai.validate(), [])
+        self.assertEqual(judge_openai.judge_model, "openai-judge-model")
 
     def test_openai_compatible_backend_requires_api_settings(self) -> None:
         config = Config(
@@ -401,6 +481,52 @@ class ConfigTests(unittest.TestCase):
             errors,
         )
         self.assertIn("retrieval.openai_timeout must be an integer >= 1", errors)
+
+    def test_openai_compatible_judge_backend_requires_api_settings(self) -> None:
+        config = Config(
+            anthropic_api_key="anthropic",
+            brave_api_key="brave",
+            haiku_model="haiku",
+            sonnet_model="sonnet",
+            local_retrieval_model="qwen",
+            retrieval_backend="anthropic_haiku",
+            local_retrieval_model_count=0,
+            local_retrieval_base_urls=(),
+            local_retrieval_api_key="",
+            local_retrieval_timeout=0,
+            max_retrieval_turns=2,
+            max_search_results=3,
+            max_page_chars=1000,
+            local_retrieval_parallel_agents=0,
+            local_retrieval_max_parallel_tool_calls=0,
+            cv_path="input/cv.md",
+            context_path="input/context.md",
+            schools_path="input/schools.json",
+            retry_gap_fill=True,
+            gap_fill_max_turns=1,
+            max_schools_parallel=1,
+            max_sonnet_parallel=1,
+            http_timeout=10,
+            http_retries=0,
+            output_dir="output",
+            logs_dir="",
+            judge_backend="openai_compatible",
+            openai_judge_model="",
+            openai_judge_base_urls=(),
+            openai_judge_api_key="",
+            openai_judge_timeout=0,
+        )
+
+        errors = config.validate()
+
+        self.assertIn("models.openai_judge must be set", errors)
+        self.assertIn("judge.openai_base_urls must include at least one endpoint", errors)
+        self.assertIn(
+            "OPENAI_API_KEY, OPENAI_COMPATIBLE_API_KEY, or OPENAI_JUDGE_API_KEY "
+            "is required for judge.backend=openai_compatible",
+            errors,
+        )
+        self.assertIn("judge.openai_timeout must be an integer >= 1", errors)
 
     def test_local_model_count_defaults_to_endpoint_count(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

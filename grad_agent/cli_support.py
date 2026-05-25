@@ -68,6 +68,7 @@ def config_overrides(args: argparse.Namespace) -> dict[str, object]:
     _set_if_present(overrides, "max_retrieval_turns", args.max_turns)
     _set_if_present(overrides, "max_schools_parallel", args.max_parallel)
     _set_if_present(overrides, "retrieval_backend", args.retrieval_backend)
+    _set_if_present(overrides, "judge_backend", getattr(args, "judge_backend", None))
     _set_path_if_present(overrides, "cv_path", args.cv)
     _set_path_if_present(overrides, "context_path", args.context)
     _set_path_if_present(overrides, "schools_path", args.schools)

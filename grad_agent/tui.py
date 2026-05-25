@@ -68,6 +68,8 @@ _PROGRESS_STAGE_ORDER = ("done", "retrieval", "judge+fit", "gap_fill", "failed",
 class TUIRunSettings:
     retrieval_backend: str = ""
     retrieval_model: str = ""
+    judge_backend: str = ""
+    judge_model: str = ""
     uses_local_retrieval: bool = False
     local_model_count: int = 0
     local_parallel_agents: int = 0
@@ -81,6 +83,8 @@ class TUIRunSettings:
         return cls(
             retrieval_backend=getattr(config, "retrieval_backend", ""),
             retrieval_model=getattr(config, "retrieval_model", ""),
+            judge_backend=getattr(config, "judge_backend", ""),
+            judge_model=getattr(config, "judge_model", ""),
             uses_local_retrieval=bool(getattr(config, "uses_local_retrieval", False)),
             local_model_count=getattr(config, "local_retrieval_model_count", 0),
             local_parallel_agents=getattr(config, "local_retrieval_parallel_agents", 0),
@@ -97,6 +101,9 @@ class TUIRunSettings:
         if self.retrieval_backend:
             model = f"/{self.retrieval_model}" if self.retrieval_model else ""
             parts.append(f"retrieval {self.retrieval_backend}{model}")
+        if self.judge_backend:
+            model = f"/{self.judge_model}" if self.judge_model else ""
+            parts.append(f"judge {self.judge_backend}{model}")
         if self.uses_local_retrieval:
             parts.append(
                 "local "
@@ -109,7 +116,7 @@ class TUIRunSettings:
         if self.max_schools_parallel:
             concurrency.append(f"{self.max_schools_parallel} schools")
         if self.max_sonnet_parallel:
-            concurrency.append(f"{self.max_sonnet_parallel} Sonnet")
+            concurrency.append(f"{self.max_sonnet_parallel} judge/fit")
         if concurrency:
             parts.append("parallel " + ", ".join(concurrency))
         return " | ".join(parts)

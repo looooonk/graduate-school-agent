@@ -43,6 +43,11 @@ def _test_config(**overrides: object) -> Config:
         "openai_retrieval_base_urls": ("https://api.openai.test/v1",),
         "openai_retrieval_api_key": "openai-key",
         "openai_retrieval_timeout": 30,
+        "judge_backend": "anthropic_sonnet",
+        "openai_judge_model": "openai-judge-test",
+        "openai_judge_base_urls": ("https://api.judge.test/v1",),
+        "openai_judge_api_key": "openai-judge-key",
+        "openai_judge_timeout": 30,
         "max_retrieval_turns": 2,
         "max_search_results": 3,
         "max_page_chars": 20,
@@ -268,7 +273,61 @@ class PipelineStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report.overall_quality.value, "partial")
         self.assertEqual(report.flagged_fields[0].field, "deadline")
         self.assertEqual(stats.api_calls, 1)
+        self.assertEqual(stats.model, "sonnet-test")
         self.assertEqual(client.messages.calls[0]["model"], "sonnet-test")
+
+    async def test_run_judge_uses_openai_compatible_backend(self) -> None:
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "overall_quality": "pass",
+                                        "flagged_fields": [],
+                                        "suggested_queries": [],
+                                        "notes": "ok",
+                                    }
+                                )
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+                }
+
+        class FakeHttp:
+            def __init__(self) -> None:
+                self.url = ""
+                self.kwargs: dict[str, object] = {}
+
+            async def post(self, url: str, **kwargs: object) -> FakeResponse:
+                self.url = url
+                self.kwargs = kwargs
+                return FakeResponse()
+
+        http = FakeHttp()
+
+        report, stats = await judge.run_judge(
+            retrieval.SchoolProfile(school_name="Example", program_name="MS CS"),
+            _test_config(judge_backend="openai_compatible"),
+            FakeClient([]),
+            http=http,
+        )
+
+        self.assertEqual(report.overall_quality.value, "pass")
+        self.assertEqual(stats.model, "openai-judge-test")
+        self.assertEqual(stats.api_calls, 1)
+        self.assertEqual(stats.input_tokens, 10)
+        self.assertEqual(stats.output_tokens, 5)
+        self.assertEqual(http.url, "https://api.judge.test/v1/chat/completions")
+        self.assertEqual(http.kwargs["headers"]["Authorization"], "Bearer openai-judge-key")
+        self.assertEqual(http.kwargs["json"]["model"], "openai-judge-test")
 
     async def test_run_fit_parses_fake_response_without_api_endpoint(self) -> None:
         client = FakeClient(
@@ -558,6 +617,7 @@ class CliTests(unittest.TestCase):
             max_turns=None,
             max_parallel=None,
             retrieval_backend=None,
+            judge_backend=None,
             cv=Path("custom/cv.md"),
             context=Path("custom/context.md"),
             schools=Path("custom/schools.json"),
@@ -573,6 +633,21 @@ class CliTests(unittest.TestCase):
                 "schools_path": "custom/schools.json",
             },
         )
+
+    def test_config_overrides_include_judge_backend(self) -> None:
+        args = argparse.Namespace(
+            max_turns=None,
+            max_parallel=None,
+            retrieval_backend=None,
+            judge_backend="openai_compatible",
+            cv=None,
+            context=None,
+            schools=None,
+            no_gap_fill=False,
+            output=None,
+        )
+
+        self.assertEqual(cli.config_overrides(args), {"judge_backend": "openai_compatible"})
 
     def test_load_schools_requires_program_for_inline_school(self) -> None:
         args = argparse.Namespace(schools=None, school="A", program=None)

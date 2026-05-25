@@ -16,6 +16,7 @@ from pathlib import Path
 from grad_agent.cli_support import config_overrides, load_schools, read_context, read_required_text
 from grad_agent.config import Config
 from grad_agent.events import EventCallback
+from grad_agent.judge_registry import judge_backend_ids
 from grad_agent.pipeline.runner import run_all_schools
 from grad_agent.retrieval_registry import retrieval_backend_ids
 from grad_agent.util.log import setup_logging
@@ -101,6 +102,12 @@ def _parse_args() -> argparse.Namespace:
         help="Override retrieval backend implementation",
     )
     parser.add_argument(
+        "--judge-backend",
+        choices=judge_backend_ids(),
+        default=None,
+        help="Override judge backend implementation",
+    )
+    parser.add_argument(
         "--no-gap-fill",
         action="store_true",
         help="Disable automatic gap-fill when judge rates profile as insufficient",
@@ -147,11 +154,13 @@ def main() -> None:
         else ""
     )
     log.info(
-        "Configuration: retrieval=%s/%s%s, sonnet=%s, max_turns=%d, "
-        "schools_parallel=%d, sonnet_parallel=%d",
+        "Configuration: retrieval=%s/%s%s, judge=%s/%s, sonnet=%s, max_turns=%d, "
+        "schools_parallel=%d, judge_fit_parallel=%d",
         config.retrieval_backend,
         config.retrieval_model,
         retrieval_topology,
+        config.judge_backend,
+        config.judge_model,
         config.sonnet_model,
         config.max_retrieval_turns,
         config.max_schools_parallel,

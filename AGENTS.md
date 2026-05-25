@@ -16,7 +16,7 @@ This repository implements a graduate school research agent. It researches gradu
 Default pipeline:
 
 ```text
-retrieval backend -> judge (Sonnet) + fit (Sonnet) -> Markdown/PDF
+retrieval backend -> judge backend + fit (Sonnet) -> Markdown/PDF
                   -> optional gap-fill -> re-judge + re-fit
 ```
 
@@ -45,6 +45,7 @@ Do not run the full `grad-agent` program for routine validation because it can s
 
 - Retrieval is dispatched through a modular backend registry. `retrieval.backend` names an implementation, not a one-off conditional path.
 - The currently supported retrieval implementations are `local_qwen_vllm`, `local_openai_compatible`, `openai_compatible`, `anthropic_haiku`, and `anthropic_sonnet`.
+- Judge is dispatched through a modular backend registry. `judge.backend` names an implementation; current options are `anthropic_sonnet`, `anthropic_haiku`, and `openai_compatible`.
 - `local_qwen_vllm` uses local OpenAI-compatible chat completions, currently configured for Qwen/vLLM. It uses a strict JSON command loop for `web_search` and `fetch_page` and may emit one tool command or a batched `tools` list per turn.
 - `local_openai_compatible` uses the same local endpoint path without tying the backend id to Qwen.
 - `openai_compatible` uses remote OpenAI-compatible chat completions with the same JSON command loop. Configure it with `models.openai_retrieval`, `retrieval.openai_base_urls`, and `OPENAI_API_KEY` or `OPENAI_COMPATIBLE_API_KEY`.
@@ -53,7 +54,7 @@ Do not run the full `grad-agent` program for routine validation because it can s
 - `web_search` calls Brave Search. `fetch_page` uses `httpx`, strips HTML, and truncates to `config.max_page_chars`.
 - Judge and fit run concurrently for a school, including the post-gap-fill pass.
 - Gap-fill runs only when enabled, the judge returns `insufficient`, and suggested queries are present.
-- Schools run with bounded concurrency from `max_schools_parallel`; concurrent Sonnet calls are bounded separately by `max_sonnet_parallel`.
+- Schools run with bounded concurrency from `max_schools_parallel`; concurrent judge/fit calls are bounded separately by `max_sonnet_parallel`.
 - `http.retries` applies to local endpoint failover, not to fetch/search handlers.
 - API-based retrieval calls should use `grad_agent.util.retry.api_create_with_retry` for rate-limit retry and exponential backoff behavior.
 
@@ -65,8 +66,9 @@ grad_agent/
   cli_support.py         CLI input/config override helpers
   config.py              YAML, .env, and environment config loading
   events.py              pipeline event dataclasses
+  judge_registry.py      judge backend metadata and supported ids
   retrieval_registry.py  retrieval backend metadata and supported ids
-  llm/vllm.py            OpenAI-compatible retrieval client
+  llm/vllm.py            OpenAI-compatible chat client
   models.py              Pydantic schemas
   tui.py                 Rich live terminal UI
   pipeline/
@@ -76,7 +78,8 @@ grad_agent/
     gap_fill.py          targeted insufficient-profile retrieval
     tool_loop.py         shared tool command execution and events
     confidence.py        judge-aware fit confidence calibration
-    judge.py             Sonnet quality judge
+    judge.py             judge stage dispatch
+    judge_backends/      concrete judge implementations
     fit.py               Sonnet CV-aware fit assessor
     runner.py            per-school orchestration and output writing
     prompts.py           system and user prompts
@@ -109,26 +112,29 @@ Secrets are environment-only:
 ANTHROPIC_API_KEY
 BRAVE_API_KEY
 VLLM_API_KEY  # optional, only when local vLLM servers require bearer auth
-OPENAI_API_KEY  # only when retrieval.backend=openai_compatible
+OPENAI_API_KEY  # when an OpenAI-compatible backend needs it
 OPENAI_COMPATIBLE_API_KEY  # optional alternate key for compatible providers
+OPENAI_JUDGE_API_KEY  # optional judge-specific compatible provider key
 ```
 
 Do not add API keys to `config.yaml`, tests, docs examples with real values, or trajectory logs.
 
 Important config areas:
 
-- `models.*`: Claude, local retrieval, and OpenAI-compatible retrieval model names.
+- `models.*`: Claude, local retrieval, and OpenAI-compatible backend model names.
 - `input.cv`, `input.context`, `input.schools`: default input paths.
 - `retrieval.backend`: registered retrieval backend id. Current options are `local_qwen_vllm`, `local_openai_compatible`, `openai_compatible`, `anthropic_haiku`, and `anthropic_sonnet`.
+- `judge.backend`: registered judge backend id. Current options are `anthropic_sonnet`, `anthropic_haiku`, and `openai_compatible`.
 - `retrieval.max_turns`, `max_search_results`, `max_page_chars`: retrieval budgets.
 - `retrieval.local_model_count`: expected number of local model copies.
 - `retrieval.local_base_urls`: local OpenAI-compatible endpoints; length must match `local_model_count`.
 - `retrieval.openai_base_urls`: remote OpenAI-compatible chat-completions endpoints.
+- `judge.openai_base_urls`: remote OpenAI-compatible judge chat-completions endpoints.
 - `retrieval.local_parallel_agents`: per-school local retrieval fanout.
 - `retrieval.local_max_parallel_tool_calls`: concurrent tool calls from one local turn.
 - `judge.retry_gap_fill`, `judge.gap_fill_max_turns`: gap-fill behavior.
 - `concurrency.max_schools_parallel`: school pipeline concurrency.
-- `concurrency.max_sonnet_parallel`: concurrent Sonnet judge/fit calls.
+- `concurrency.max_sonnet_parallel`: concurrent judge/fit calls.
 - `logs.dir`: set to `""` to disable trajectory logging.
 - `deploy.*`: settings consumed by deployment scripts.
 
@@ -137,6 +143,10 @@ Important config areas:
 Retrieval backends are registered in `grad_agent/retrieval_registry.py` and implemented under `grad_agent/pipeline/retrieval_backends/`. To add a backend, add its metadata, implement the `RetrievalBackend.run()` protocol in a separate module in that directory, register the implementation in `_BACKEND_IMPLEMENTATIONS`, and add focused tests for config validation, model selection, dispatch, and endpoint-specific tool-call behavior.
 
 API-based retrieval implementations should keep endpoint calling and retry behavior inside their backend class or a small LLM client helper. Local implementations should use OpenAI-compatible chat completions where possible and keep local process startup outside the Python package. The Anthropic backend uses native tool-use blocks; OpenAI-compatible backends use the JSON tool-command loop.
+
+## Judge Backend Usage
+
+Judge backends are registered in `grad_agent/judge_registry.py` and implemented under `grad_agent/pipeline/judge_backends/`. To add a backend, add its metadata, implement the `JudgeBackend.run()` protocol in a separate module in that directory, register the implementation in `_BACKEND_IMPLEMENTATIONS`, and add focused tests for config validation, model selection, dispatch, and endpoint-specific response handling.
 
 ## Local Endpoint Usage
 
@@ -176,6 +186,7 @@ Useful flags:
 - `--max-turns N`: override retrieval turn budget.
 - `--max-parallel N`: override max concurrent school pipelines.
 - `--retrieval-backend BACKEND`: override retrieval backend implementation.
+- `--judge-backend BACKEND`: override judge backend implementation.
 - `--no-gap-fill`: disable insufficient-profile gap-fill.
 - `--verbose`: disable the TUI and enable debug logs.
 
@@ -265,7 +276,9 @@ Use `python3 -m tests.preview_tui` or `python3 -m tests.preview_tui --snapshot` 
 - Keep external tool schemas and handlers in `grad_agent/pipeline/tools.py`.
 - Keep shared retrieval tool execution and `ToolCalled` event behavior in `grad_agent/pipeline/tool_loop.py`.
 - Keep backend selection metadata in `grad_agent/retrieval_registry.py`.
+- Keep judge backend selection metadata in `grad_agent/judge_registry.py`.
 - Keep concrete retrieval implementation classes under `grad_agent/pipeline/retrieval_backends/`; `retrieval.py` should remain thin stage dispatch.
+- Keep concrete judge implementation classes under `grad_agent/pipeline/judge_backends/`; `judge.py` should remain thin stage dispatch.
 - Keep local JSON tool-command behavior in `grad_agent/pipeline/local_retrieval.py`.
 - Keep targeted insufficient-profile retrieval in `grad_agent/pipeline/gap_fill.py`.
 - Tool handlers should return strings suitable for LLM consumption, not structured Python objects.

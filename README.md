@@ -2,7 +2,7 @@
 
 An LLM research agent for graduate application planning. It gathers program information, checks source quality, assesses applicant fit against a CV, and writes Markdown and PDF reports.
 
-The default pipeline uses a modular retrieval backend layer, then Claude Sonnet for profile judging and fit assessment. Registered retrieval implementations include local OpenAI-compatible endpoints, remote OpenAI-compatible APIs, and Anthropic tool-use models.
+The default pipeline uses modular backend layers for retrieval and profile judging, then Claude Sonnet for fit assessment. Registered retrieval implementations include local OpenAI-compatible endpoints, remote OpenAI-compatible APIs, and Anthropic tool-use models.
 
 ![Graduate School Agent TUI demo](resources/demo.gif)
 Demo run of the TUI.
@@ -14,7 +14,7 @@ Demo run of the TUI.
 - Local OpenAI-compatible retrieval with parallel agents and batched tool calls.
 - Anthropic Haiku or Sonnet retrieval with native tool calls and retry/backoff handling.
 - Remote OpenAI-compatible API retrieval for OpenAI, OpenRouter, Together, Groq, or similar chat-completions endpoints.
-- Sonnet quality judging for missing, stale, contradictory, or weakly sourced fields.
+- Pluggable quality judging for missing, stale, contradictory, or weakly sourced fields.
 - Sonnet CV-aware fit assessment.
 - Optional gap-fill pass for insufficient profiles.
 - Markdown and PDF reports plus a ranked summary.
@@ -42,7 +42,7 @@ export BRAVE_API_KEY=BSA...
 export OPENAI_API_KEY=sk-...
 ```
 
-`config.yaml` is for non-secret settings only. Set `VLLM_API_KEY` only if your local endpoints require bearer-token auth. Set `OPENAI_COMPATIBLE_API_KEY` instead of `OPENAI_API_KEY` when using a non-OpenAI compatible API provider.
+`config.yaml` is for non-secret settings only. Set `VLLM_API_KEY` only if your local endpoints require bearer-token auth. Set `OPENAI_COMPATIBLE_API_KEY` instead of `OPENAI_API_KEY` when using a non-OpenAI compatible API provider, or `OPENAI_JUDGE_API_KEY` when only the judge backend should use a separate key.
 
 ## Quick Start
 
@@ -84,6 +84,14 @@ grad-agent --retrieval-backend openai_compatible
 grad-agent --retrieval-backend local_openai_compatible
 ```
 
+Swap judge backends from the CLI:
+
+```bash
+grad-agent --judge-backend anthropic_sonnet
+grad-agent --judge-backend anthropic_haiku
+grad-agent --judge-backend openai_compatible
+```
+
 ## Inputs
 
 `input/schools.json` is a list of school/program objects:
@@ -117,6 +125,7 @@ Useful flags:
 - `--max-turns N`: override retrieval turn budget.
 - `--max-parallel N`: override max concurrent school pipelines.
 - `--retrieval-backend BACKEND`: choose any registered retrieval backend implementation.
+- `--judge-backend BACKEND`: choose any registered judge backend implementation.
 - `--no-gap-fill`: disable targeted gap-fill.
 - `--verbose`: bypass the Rich TUI and print debug logs.
 
@@ -139,7 +148,7 @@ retrieval -> judge + fit -> Markdown/PDF
 ```
 
 - `retrieval` produces a structured `SchoolProfile` using Brave Search and fetched web pages.
-- `judge` evaluates completeness, source quality, consistency, freshness, and actionability.
+- `judge` evaluates completeness, source quality, consistency, freshness, and actionability using `judge.backend`.
 - `fit` compares the profile with the applicant CV and optional context.
 - `gap-fill` runs only when enabled and the judge marks the initial profile insufficient.
 
@@ -150,12 +159,14 @@ Schools run with bounded concurrency. Judge and fit calls run concurrently for e
 `Config.load()` merges built-in defaults, `config.yaml`, `.env`, and explicit CLI overrides. See `config.yaml` for current defaults.
 
 - `retrieval.backend`: registered retrieval backend id. Current options are `local_qwen_vllm`, `local_openai_compatible`, `openai_compatible`, `anthropic_haiku`, and `anthropic_sonnet`.
+- `judge.backend`: registered judge backend id. Current options are `anthropic_sonnet`, `anthropic_haiku`, and `openai_compatible`.
 - `input.*`: default CV, context, and schools paths.
-- `models.local_retrieval`, `models.openai_retrieval`, `models.haiku`, and `models.sonnet`: model ids used by retrieval implementations.
+- `models.local_retrieval`, `models.openai_retrieval`, `models.openai_judge`, `models.haiku`, and `models.sonnet`: model ids used by backend implementations.
 - `retrieval.local_model_count` and `retrieval.local_base_urls`: local endpoint topology.
 - `retrieval.openai_base_urls`: remote OpenAI-compatible API endpoints.
+- `judge.openai_base_urls`: remote OpenAI-compatible judge API endpoints.
 - `retrieval.local_parallel_agents`: per-school local retrieval fanout.
-- `concurrency.*`: school and Sonnet concurrency limits.
+- `concurrency.*`: school and judge/fit concurrency limits.
 - `logs.dir`: set to `""` to disable trajectory logging.
 
 ## Retrieval Backends
@@ -183,6 +194,30 @@ models:
 ```
 
 To add another retrieval option, add a backend spec, implement the `RetrievalBackend.run()` protocol in a new module under `grad_agent/pipeline/retrieval_backends/`, register it in that package's `_BACKEND_IMPLEMENTATIONS`, and add focused tests for dispatch, model selection, and any endpoint-specific tool-call behavior.
+
+## Judge Backends
+
+Profile judging is selected by `judge.backend` and dispatched through `grad_agent/judge_registry.py`. Concrete implementations live under `grad_agent/pipeline/judge_backends/`.
+
+Current implementations:
+
+- `anthropic_sonnet`: Anthropic Messages API using the configured Sonnet model. This is the default.
+- `anthropic_haiku`: Anthropic Messages API using the configured Haiku model.
+- `openai_compatible`: remote OpenAI-compatible chat completions. Set `models.openai_judge`, `judge.openai_base_urls`, and `OPENAI_JUDGE_API_KEY`, `OPENAI_COMPATIBLE_API_KEY`, or `OPENAI_API_KEY`.
+
+Hot-swap example:
+
+```yaml
+judge:
+  backend: openai_compatible
+  openai_base_urls:
+    - https://api.openai.com/v1
+
+models:
+  openai_judge: gpt-4.1
+```
+
+To add another judge option, add a backend spec, implement the `JudgeBackend.run()` protocol in a new module under `grad_agent/pipeline/judge_backends/`, register it in that package's `_BACKEND_IMPLEMENTATIONS`, and add focused tests for config validation, model selection, and dispatch behavior.
 
 ## Local Endpoints
 

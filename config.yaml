@@ -2,6 +2,7 @@ models:
   haiku: claude-haiku-4-5-20251001
   sonnet: claude-sonnet-4-6
   local_retrieval: Qwen/Qwen3.6-35B-A3B-FP8
+  openai_judge: gpt-4.1
 
 input:
   cv: input/cv.md
@@ -22,6 +23,7 @@ retrieval:
   local_timeout: 600
 
 judge:
+  backend: anthropic_sonnet
   retry_gap_fill: true
   gap_fill_max_turns: 5
 
