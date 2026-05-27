@@ -238,15 +238,128 @@ class ConfidenceLevel(StrEnum):
     LOW = "low"
 
 
+class FitDimensionScore(BaseModel):
+    """Evidence-backed 0-10 score for one fit dimension."""
+
+    score: float = Field(ge=0.0, le=10.0)
+    positive_evidence: list[str] = Field(default_factory=list)
+    negative_evidence: list[str] = Field(default_factory=list)
+
+    @field_validator("score", mode="before")
+    @classmethod
+    def coerce_score(cls, v: Any) -> float:
+        if isinstance(v, str):
+            return float(v.strip().split("/", 1)[0])
+        return v
+
+    @field_validator("positive_evidence", "negative_evidence", mode="before")
+    @classmethod
+    def coerce_evidence(cls, v: Any) -> list[str]:
+        if isinstance(v, str):
+            return [v] if v.strip() else []
+        return v or []
+
+
+class FitScoreBreakdown(BaseModel):
+    """Structured inputs used to compute a deterministic overall fit score."""
+
+    research_alignment: FitDimensionScore
+    advisor_fit: FitDimensionScore
+    applicant_competitiveness: FitDimensionScore
+    program_structure_fit: FitDimensionScore
+    constraint_fit: FitDimensionScore
+
+
+FIT_SCORE_DIMENSIONS = (
+    "research_alignment",
+    "advisor_fit",
+    "applicant_competitiveness",
+    "program_structure_fit",
+    "constraint_fit",
+)
+
+FIT_SCORE_WEIGHTS_DEFAULT = {
+    "research_alignment": 0.35,
+    "advisor_fit": 0.25,
+    "applicant_competitiveness": 0.20,
+    "program_structure_fit": 0.10,
+    "constraint_fit": 0.10,
+}
+
+FIT_SCORE_CAPS = {
+    "no_named_advisor": 0.65,
+    "generic_area_match_only": 0.70,
+    "degree_structure_mismatch": 0.65,
+    "severe_constraint_mismatch": 0.70,
+    "wrong_or_unverified_primary_advisors": 0.75,
+    "insufficient_profile_evidence": 0.80,
+    "no_competitiveness_evidence": 0.85,
+}
+
+
+def compute_overall_fit_score(
+    breakdown: FitScoreBreakdown,
+    score_caps: list[str] | None = None,
+    weights: dict[str, float] | None = None,
+) -> float:
+    weights = weights or FIT_SCORE_WEIGHTS_DEFAULT
+    total_weight = sum(weights[dim] for dim in FIT_SCORE_DIMENSIONS)
+    raw = sum(
+        getattr(breakdown, dim).score / 10.0 * weights[dim]
+        for dim in FIT_SCORE_DIMENSIONS
+    ) / total_weight
+    cap = min(
+        [1.0]
+        + [
+            FIT_SCORE_CAPS[cap]
+            for cap in _normalize_fit_score_caps(score_caps)
+            if cap in FIT_SCORE_CAPS
+        ]
+    )
+    return round(min(raw, cap), 4)
+
+
+def _normalize_fit_score_caps(score_caps: list[str] | None) -> list[str]:
+    return [_normalize_fit_score_cap(cap) for cap in score_caps or []]
+
+
+def _normalize_fit_score_cap(cap: Any) -> str:
+    if isinstance(cap, dict):
+        cap = cap.get("cap") or cap.get("name") or cap.get("type") or ""
+    text = str(cap).strip().lower().replace("-", "_").replace(" ", "_")
+    return "_".join(part for part in text.split("_") if part)
+
+
 class FitAssessment(BaseModel):
     """CV-aware fit assessment for a single school."""
 
-    overall_score: float = Field(ge=0.0, le=1.0)
+    overall_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    score_breakdown: FitScoreBreakdown | None = None
+    score_caps: list[str] = Field(default_factory=list)
+    scoring_notes: str | None = None
     research_alignment: str
     advisor_candidates: list[str] = Field(default_factory=list)
     competitiveness: str
     gaps: str
     confidence: ConfidenceLevel
+
+    @field_validator("score_caps", mode="before")
+    @classmethod
+    def coerce_score_caps(cls, v: Any) -> list[str]:
+        if isinstance(v, str):
+            return [_normalize_fit_score_cap(v)] if v.strip() else []
+        return [_normalize_fit_score_cap(item) for item in v or []]
+
+    @model_validator(mode="after")
+    def score_from_breakdown(self) -> FitAssessment:
+        if self.score_breakdown is not None:
+            self.overall_score = compute_overall_fit_score(
+                self.score_breakdown,
+                self.score_caps,
+            )
+        elif "overall_score" not in self.model_fields_set:
+            raise ValueError("FitAssessment requires score_breakdown or overall_score")
+        return self
 
 
 class SchoolResult(BaseModel):

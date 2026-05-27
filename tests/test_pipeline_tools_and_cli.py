@@ -334,7 +334,35 @@ class PipelineStageTests(unittest.IsolatedAsyncioTestCase):
                 fake_response(
                     json.dumps(
                         {
-                            "overall_score": 0.64,
+                            "score_breakdown": {
+                                "research_alignment": {
+                                    "score": 8,
+                                    "positive_evidence": ["Good NLP overlap."],
+                                    "negative_evidence": [],
+                                },
+                                "advisor_fit": {
+                                    "score": 7,
+                                    "positive_evidence": ["Jane Smith works on NLP."],
+                                    "negative_evidence": [],
+                                },
+                                "applicant_competitiveness": {
+                                    "score": 8,
+                                    "positive_evidence": ["Competitive profile."],
+                                    "negative_evidence": [],
+                                },
+                                "program_structure_fit": {
+                                    "score": 6,
+                                    "positive_evidence": ["MS program matches degree goal."],
+                                    "negative_evidence": ["Funding unclear."],
+                                },
+                                "constraint_fit": {
+                                    "score": 9,
+                                    "positive_evidence": ["No stated constraints conflict."],
+                                    "negative_evidence": [],
+                                },
+                            },
+                            "score_caps": [],
+                            "scoring_notes": "",
                             "research_alignment": "Good NLP overlap.",
                             "advisor_candidates": ["Jane Smith - NLP"],
                             "competitiveness": "Competitive.",
@@ -353,7 +381,7 @@ class PipelineStageTests(unittest.IsolatedAsyncioTestCase):
             client,
         )
 
-        self.assertEqual(assessment.overall_score, 0.64)
+        self.assertAlmostEqual(assessment.overall_score, 0.76)
         self.assertEqual(assessment.confidence.value, "medium")
         self.assertEqual(stats.api_calls, 1)
         self.assertEqual(client.messages.calls[0]["model"], "sonnet-test")

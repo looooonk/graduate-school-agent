@@ -98,6 +98,7 @@ grad_agent/
       service.py         Sonnet CV-aware fit assessor
       confidence.py      judge-aware fit confidence calibration
       prompts.py         fit prompts
+      scoring.py         deterministic fit score composition
   orchestration/
     runner.py            per-school orchestration and output writing
   reporting/
@@ -260,16 +261,21 @@ The main Pydantic models live in `grad_agent/models.py`:
 - `ApplicantReports`
 - `JudgeReport`
 - `FlaggedField`
+- `FitDimensionScore`
+- `FitScoreBreakdown`
 - `FitAssessment`
 - `SchoolResult`
 
 Model validators intentionally accept common LLM output variants, including string/list coercions, flattened deadline dicts, normalized GRE policy variants, dict advisor entries, dict source maps, and list notes. Preserve these coercions unless a schema change is deliberate and covered by tests.
+
+Fit assessment uses a structured rubric. The fit agent should produce `score_breakdown` dimension scores and evidence, not an LLM-invented final real number. `FitAssessment` computes `overall_score` from the rubric, and `agents.fit.scoring.apply_program_fit_score()` reapplies program-type weights for MS-like and PhD-like targets.
 
 ## Reporting and Ranking
 
 - `reporting/markdown.py` renders complete school reports and the ranked summary table.
 - `reporting/pdf.py` converts generated Markdown reports to simple styled PDFs.
 - Keep raw Markdown under `output/markdown/` and matching PDFs under `output/pdf/`.
+- School reports show the computed overall fit score plus rubric dimension scores when the fit assessment includes a `score_breakdown`.
 - Summary ranking uses confidence-adjusted fit scores: high `1.0`, medium `0.85`, low `0.65`.
 - `agents.fit.confidence.calibrate_fit_confidence()` forces low confidence for insufficient profiles and caps partial profiles at medium confidence.
 

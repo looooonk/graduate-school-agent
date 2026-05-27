@@ -659,6 +659,27 @@ class ModelCoercionTests(unittest.TestCase):
                 confidence=ConfidenceLevel.LOW,
             )
 
+    def test_fit_score_is_computed_from_breakdown_and_caps(self) -> None:
+        assessment = FitAssessment.model_validate(
+            {
+                "score_breakdown": {
+                    "research_alignment": {"score": 10},
+                    "advisor_fit": {"score": 10},
+                    "applicant_competitiveness": {"score": 10},
+                    "program_structure_fit": {"score": 10},
+                    "constraint_fit": {"score": 10},
+                },
+                "score_caps": ["Degree structure mismatch"],
+                "research_alignment": "direct fit",
+                "competitiveness": "strong",
+                "gaps": "program is structurally mismatched",
+                "confidence": "medium",
+            }
+        )
+
+        self.assertEqual(assessment.score_caps, ["degree_structure_mismatch"])
+        self.assertEqual(assessment.overall_score, 0.65)
+
 
 class MarkdownRenderingTests(unittest.TestCase):
     def test_school_markdown_marks_flagged_deadline_and_omits_empty_optional_sections(self) -> None:
@@ -689,6 +710,40 @@ class MarkdownRenderingTests(unittest.TestCase):
         self.assertIn("- **deadline**: Prior-cycle deadline.", markdown)
         self.assertNotIn("## Essay Prompts", markdown)
         self.assertNotIn("## Fit Summary", markdown)
+
+    def test_school_markdown_renders_fit_dimension_breakdown(self) -> None:
+        profile = SchoolProfile(school_name="Example University", program_name="PhD CS")
+        fit = FitAssessment.model_validate(
+            {
+                "score_breakdown": {
+                    "research_alignment": {
+                        "score": 8,
+                        "positive_evidence": ["LLM publication"],
+                    },
+                    "advisor_fit": {
+                        "score": 7,
+                        "positive_evidence": ["Named NLP advisor"],
+                    },
+                    "applicant_competitiveness": {"score": 8},
+                    "program_structure_fit": {"score": 9},
+                    "constraint_fit": {"score": 6, "negative_evidence": ["Location unclear"]},
+                },
+                "score_caps": ["generic_area_match_only"],
+                "scoring_notes": "Advisor evidence is specific but narrow.",
+                "research_alignment": "Strong NLP overlap.",
+                "advisor_candidates": ["Jane Smith - NLP"],
+                "competitiveness": "Competitive.",
+                "gaps": "Needs advisor outreach.",
+                "confidence": "medium",
+            }
+        )
+
+        markdown = render_school_markdown(profile, fit=fit)
+
+        self.assertIn("### Dimension Scores", markdown)
+        self.assertIn("| Research alignment | 8.0 / 10 | LLM publication | None noted |", markdown)
+        self.assertIn("- **Score caps**: generic area match only", markdown)
+        self.assertIn("- **Scoring notes**: Advisor evidence is specific but narrow.", markdown)
 
     def test_summary_places_profiles_without_fit_last(self) -> None:
         no_fit = SchoolProfile(school_name="No Fit", program_name="MS")

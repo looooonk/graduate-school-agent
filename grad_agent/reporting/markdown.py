@@ -77,6 +77,8 @@ def render_school_markdown(
         fit_lines = ["## Fit Summary\n"]
         fit_lines.append(f"- **Overall score**: {fit.overall_score:.2f} / 1.00")
         fit_lines.append(f"- **Confidence**: {fit.confidence.value}")
+        if fit.score_breakdown:
+            fit_lines.extend(_fit_dimension_lines(fit))
         fit_lines.append(f"\n### Research Alignment\n\n{fit.research_alignment}")
         if fit.advisor_candidates:
             fit_lines.append("\n### Advisor Matches\n")
@@ -165,3 +167,37 @@ def _priority_score(fit: FitAssessment | None) -> float:
         "low": 0.65,
     }[fit.confidence.value]
     return fit.overall_score * confidence_weight
+
+
+def _fit_dimension_lines(fit: FitAssessment) -> list[str]:
+    assert fit.score_breakdown is not None
+    lines = [
+        "\n### Dimension Scores\n",
+        "| Dimension | Score | Positive evidence | Concerns |",
+        "|-----------|-------|-------------------|----------|",
+    ]
+    dimensions = [
+        ("Research alignment", fit.score_breakdown.research_alignment),
+        ("Advisor fit", fit.score_breakdown.advisor_fit),
+        ("Applicant competitiveness", fit.score_breakdown.applicant_competitiveness),
+        ("Program structure", fit.score_breakdown.program_structure_fit),
+        ("Constraints", fit.score_breakdown.constraint_fit),
+    ]
+    for label, dimension in dimensions:
+        lines.append(
+            f"| {label} | {dimension.score:.1f} / 10 | "
+            f"{_md_cell(_join_evidence(dimension.positive_evidence))} | "
+            f"{_md_cell(_join_evidence(dimension.negative_evidence))} |"
+        )
+    if fit.score_caps:
+        lines.append(
+            "\n- **Score caps**: "
+            + ", ".join(cap.replace("_", " ") for cap in fit.score_caps)
+        )
+    if fit.scoring_notes:
+        lines.append(f"- **Scoring notes**: {fit.scoring_notes}")
+    return lines
+
+
+def _join_evidence(items: list[str]) -> str:
+    return "; ".join(items) if items else "None noted"

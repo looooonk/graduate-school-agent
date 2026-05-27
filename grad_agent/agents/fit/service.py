@@ -7,6 +7,7 @@ import logging
 import anthropic
 
 from grad_agent.agents.fit.prompts import FIT_SYSTEM, fit_user_prompt
+from grad_agent.agents.fit.scoring import apply_program_fit_score
 from grad_agent.config import Config
 from grad_agent.models import FitAssessment, SchoolProfile
 from grad_agent.reporting.stats import StageStats, add_usage, timed
@@ -89,6 +90,8 @@ async def run_fit_assessment(
         raise RuntimeError(
             f"Fit assessment validation failed for {school_label}: {exc}"
         ) from exc
+
+    assessment = apply_program_fit_score(assessment, profile.program_name)
 
     log.info(
         "Fit score: %.2f (confidence: %s)",
